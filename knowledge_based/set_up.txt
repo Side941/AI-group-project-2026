@@ -1,0 +1,28 @@
+## Setup
+
+1. Install poppler (required for PDF text extraction)
+conda install -c conda-forge poppler
+
+2. Install Python dependencies
+pip install chromadb sentence-transformers torch tqdm pandas scikit-learn
+
+For GPU support (recommended), install PyTorch with CUDA:
+pip install torch --index-url https://download.pytorch.org/whl/cu118
+
+3. Download the ICD-11 PDF
+Download the ICD-11 CDDR PDF from the official WHO website:
+https://iris.who.int/server/api/core/bitstreams/dcf73611-9e0f-4d5c-85f6-85a58b0da6de/content
+
+Rename it to icd_11.pdf and place it in the data/ folder:
+
+
+4. Build the knowledge base
+Open and run icd11_knowledge_base.ipynb top to bottom.
+This will:
+- Extract and chunk the ICD-11 PDF into data/icd11_chunks.json
+- Embed the chunks using FremyCompany/BioLORD-2023
+- Store the vectors in data/chroma_db/
+
+The embedding model (~400MB) will be downloaded automatically from HuggingFace
+on first run.
+
