@@ -13,7 +13,7 @@ your_project/
 │   ├── retrieval.py
 │   └── main.py
 └── data/
-    └── icd_11.pdf          ← your ICD-11 CDDR PDF goes here
+    └── icd_11.pdf          ← your ICD-11 CDDR PDF goes here: https://iris.who.int/server/api/core/bitstreams/dcf73611-9e0f-4d5c-85f6-85a58b0da6de/content (make sure to rename it)
 ```
 
 ---
@@ -21,7 +21,7 @@ your_project/
 ## 1. Prerequisites
 
 ### Python
-Python 3.10 or later is required (uses `str | None` union syntax).
+Python 3.10 or later is required.
 
 ### Conda environment (recommended)
 
