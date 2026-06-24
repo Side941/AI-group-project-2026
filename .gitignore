@@ -3,3 +3,6 @@ __pycache__/
 *.csv
 .DS_Store
 *.pyc
+/knowledge_based/data/chroma_db
+knowledge_based/data/icd11_chunks.json
+knowledge_based/data/icd_11.pdf
