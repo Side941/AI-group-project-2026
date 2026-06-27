@@ -3,12 +3,10 @@ import nltk # type: ignore
 import string
 from pathlib import Path
 
-# Download necessary NLTK resources for tokenization
 nltk.download('punkt', quiet=True)
 nltk.download('punkt_tab', quiet=True)
 
-# Load chunks from a JSON file
-def load_chunks(json_path="knowledge_based/cddr_chunks.json"):
+def load_chunks(json_path="knowledge_based/icd11_chunks.json"):
     path = Path(json_path)
     if not path.exists():
         raise FileNotFoundError(f"Knowledge base file not found: {json_path}")
@@ -17,9 +15,16 @@ def load_chunks(json_path="knowledge_based/cddr_chunks.json"):
             chunks = json.load(f)
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in knowledge base file: {e}")
+
+    for chunk in chunks:
+        chunk['id'] = f"{chunk.get('disorder_code', 'unknown')}_{chunk.get('section', 'unknown').lower().replace(' ', '_')}"
+        # Keep original short text for prompt injection
+        chunk['prompt_text'] = chunk.get('text', '')
+        # Use richer embed_text for retrieval indexing
+        chunk['text'] = chunk.get('embed_text') or chunk.get('prompt_text', '')
+
     return chunks
 
-# Tokenize text into lowercase words, removing punctuation
 def tokenize(text):
     tokens = nltk.word_tokenize(text.lower())
     result = []
