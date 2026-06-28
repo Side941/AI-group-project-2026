@@ -17,9 +17,12 @@ class BM25Retriever:
             self.chunks = chunks
 
         # Tokenize the text in each chunk for BM25 indexing
+        # Use prompt_text (clean clinical text) not text (embed_text with metadata headers)
+        # embed_text contains repeated generic words like "Source", "Domain", "Disorder"
+        # which pollute BM25 keyword matching and cause false positives
         self.tokenized_chunks = []
         for chunk in self.chunks:
-            self.tokenized_chunks.append(tokenize(chunk['text']))
+            self.tokenized_chunks.append(tokenize(chunk.get('prompt_text') or chunk['text']))
 
         # Build BM25 index
         self.bm25 = BM25Okapi(self.tokenized_chunks)

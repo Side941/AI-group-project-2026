@@ -1,60 +1,72 @@
 # hybrid_retriever.py
-
 from bm25_retriever import BM25Retriever
-from dense_retriever import DenseRetriever
+import components.ingestion as ingestion
 
-# HybridRetriever class that combines BM25 and dense retrieval methods
 class HybridRetriever:
-    def __init__(self, chunks=None, json_path=None, 
-             alpha=0.5, model_name='all-MiniLM-L6-v2'):
-        # Build both retrievers from the same chunks
+    def __init__(self, chunks=None, json_path=None, alpha=0.3):
         self.bm25 = BM25Retriever(chunks=chunks, json_path=json_path)
-        self.dense = DenseRetriever(chunks=chunks, json_path=json_path, model_name=model_name)
-        self.alpha = alpha  # weight: alpha*BM25 + (1-alpha)*dense
-        
+        # DO NOT call initialise_retrieval() here
+        # It is called once in build_retrievers() with the correct chroma_path
+        self.alpha = alpha
+
     def search(self, query, k=5):
-        """Combine BM25 and dense scores, return re-ranked top-k."""
-        # Get more candidates from each (k*2) to allow re-ranking
+        # BM25 results
         bm25_results = self.bm25.search(query, k=k*2)
-        dense_results = self.dense.search(query, k=k*2)
-        
-        # Normalize scores to 0-1 range
-        bm25_max = max(r['bm25_score'] for r in bm25_results) if bm25_results else 1
+
+        # Dense results from ChromaDB
+        query_embedding = ingestion._embedding_model.encode(
+            [query], normalize_embeddings=True
+        ).tolist()
+        raw = ingestion._collection.query(
+            query_embeddings=query_embedding,
+            n_results=k*2,
+            include=["documents", "metadatas", "distances"],
+        )
+
+        dense_results = []
+        for i in range(len(raw["documents"][0])):
+            meta = raw["metadatas"][0][i]
+            dense_results.append({
+                "id":          f"{meta['disorder_code']}_{meta['section'].lower().replace(' ', '_')}",
+                "text":        raw["documents"][0][i],
+                "prompt_text": raw["documents"][0][i],
+                "dense_score": 1 - raw["distances"][0][i],
+                **meta
+            })
+
+        # Normalise scores
+        bm25_max  = max(r['bm25_score']  for r in bm25_results)  if bm25_results  else 1
         dense_max = max(r['dense_score'] for r in dense_results) if dense_results else 1
-        
-        # Combine scores by chunk_id
+
+        # Combine by chunk id
         combined = {}
         for r in bm25_results:
             combined[r['id']] = {
-                'chunk': r,
-                'bm25_norm': r['bm25_score'] / bm25_max if bm25_max > 0 else 0,
+                'chunk':      r,
+                'bm25_norm':  r['bm25_score'] / bm25_max if bm25_max > 0 else 0,
                 'dense_norm': 0
             }
-        
-        # Add dense scores to the combined dict
         for r in dense_results:
             dense_norm = r['dense_score'] / dense_max if dense_max > 0 else 0
             if r['id'] in combined:
                 combined[r['id']]['dense_norm'] = dense_norm
             else:
                 combined[r['id']] = {
-                    'chunk': r,
-                    'bm25_norm': 0,
+                    'chunk':      r,
+                    'bm25_norm':  0,
                     'dense_norm': dense_norm
                 }
-        
-        # Calculate hybrid scores
+
+        # Score and rank
         scored = []
         for chunk_id, data in combined.items():
-            hybrid_score = (self.alpha * data['bm25_norm'] + 
+            hybrid_score = (self.alpha * data['bm25_norm'] +
                            (1 - self.alpha) * data['dense_norm'])
             chunk = data['chunk'].copy()
             chunk['hybrid_score'] = hybrid_score
-            chunk['bm25_norm'] = data['bm25_norm']
-            chunk['dense_norm'] = data['dense_norm']
+            chunk['bm25_norm']    = data['bm25_norm']
+            chunk['dense_norm']   = data['dense_norm']
             scored.append(chunk)
-        
-        # Sort by hybrid score and return top-k
+
         scored.sort(key=lambda x: x['hybrid_score'], reverse=True)
         return scored[:k]
-
