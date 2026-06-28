@@ -1,5 +1,9 @@
+# Don't push these
 __pycache__/
 *.pyc
-*.csv
 .DS_Store
-*.pyc
+venv/
+.vscode/
+knowledge_based/chroma_db/
+notebooks/knowledge_based/chroma_db/
+*.csv
