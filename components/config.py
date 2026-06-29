@@ -85,6 +85,14 @@ DOMAIN_MAP: dict[str, str] = {
     "6E6": "Secondary mental or behavioural syndromes",
 }
 
+# ── Retrieval section allowlist ───────────────────────────────────────────────
+# Canonical section names passed to retrievers and section_expander. Must match
+# the normalised values produced by chunker.normalise_section().
+RETRIEVAL_SECTIONS: list[str] = [
+    "Essential Features",
+    "Boundary with Normality",
+]
+
 # ── Section heading normalisation map ─────────────────────────────────────────
 SECTION_NORMALISE_MAP: dict[str, str] = {
     "essential (required) features":                                           "Essential Features",
