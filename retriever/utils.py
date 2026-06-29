@@ -1,6 +1,7 @@
 import json
 import string
 from pathlib import Path
+from typing import Sequence
 
 import nltk  # type: ignore
 
@@ -32,6 +33,15 @@ def load_chunks(json_path: str | Path | None = None) -> list[dict]:
         chunk["text"] = chunk.get("embed_text") or chunk.get("prompt_text", "")
 
     return chunks
+
+
+def filter_chunks_by_sections(
+    chunks: list[dict],
+    sections: Sequence[str],
+) -> list[dict]:
+    """Return only chunks whose section is in *sections*."""
+    allowlist = set(sections)
+    return [c for c in chunks if c.get("section", "") in allowlist]
 
 
 def tokenize(text: str) -> list[str]:

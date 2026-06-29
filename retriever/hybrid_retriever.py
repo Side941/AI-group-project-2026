@@ -1,6 +1,8 @@
 from bm25_retriever import BM25Retriever
 from retrieval_retriever import RetrievalRetriever
-from section_expander import top_k_disorder_keys, expand_sections
+from utils import load_chunks
+from components.config import CHUNKS_PATH
+from section_expander import build_sections_by_disorder, expansion_fetch_k, finish_search
 
 
 class HybridRetriever:
@@ -23,15 +25,21 @@ class HybridRetriever:
         self.sections = list(sections) if sections else []
         self.alpha = alpha
 
-        self.bm25  = BM25Retriever(chunks=chunks, json_path=json_path,
-                                   sections=self.sections)
+        self.bm25 = BM25Retriever(chunks=chunks, json_path=json_path,
+                                  sections=self.sections)
         self.dense = RetrievalRetriever(sections=self.sections,
-                                        json_path=json_path,
-                                        expand_same_disorder=True)
+                                        json_path=json_path)
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+        # Single section map for fusion expansion — avoids duplicating the
+        # lookup that BM25 and dense would each build independently.
+        self._sections_by_disorder = (
+            build_sections_by_disorder(
+                chunks if chunks is not None else load_chunks(json_path or CHUNKS_PATH),
+                self.sections,
+            )
+            if self.sections
+            else {}
+        )
 
     def _fuse(
         self,
@@ -76,30 +84,19 @@ class HybridRetriever:
         scored.sort(key=lambda x: x["hybrid_score"], reverse=True)
         return scored
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def search(self, query: str, k: int = 5) -> list[dict]:
         if not query or not query.strip():
             return []
 
-        fetch_k = k * 4 if self.sections else k
+        fetch_k = expansion_fetch_k(k, self.sections)
         bm25_results  = self.bm25.search(query,  k=fetch_k, expand=False)
         dense_results = self.dense.search(query, k=fetch_k, expand=False)
 
         scored = self._fuse(bm25_results, dense_results)
-
-        if not self.sections:
-            return scored[:k]
-
-        # The dense retriever's lookup is the canonical section map since it
-        # already covers all requested sections by construction.
-        top_keys = top_k_disorder_keys(scored, k)
-        return expand_sections(
-            scored_chunks=scored,
-            top_k_keys=top_keys,
-            sections_by_disorder=self.dense._sections_by_disorder,
-            score_field="hybrid_score",
-            sections=set(self.sections),
+        return finish_search(
+            scored,
+            k,
+            self.sections,
+            self._sections_by_disorder,
+            "hybrid_score",
         )

@@ -3,18 +3,42 @@ section_expander.py
 ===================
 Pure utility functions for post-retrieval section expansion.
 
-Both functions are stateless: they operate only on the data passed in and have
-no knowledge of BM25, dense embeddings, or score fields. Any retriever that
-needs to guarantee every top-k disorder is represented by all requested
-sections can call them in two lines.
+Stateless helpers: no knowledge of BM25, dense embeddings, or ChromaDB.
+Retrievers score/filter chunks, then delegate expansion here.
 
 Public API
 ----------
+    build_sections_by_disorder(chunks, sections) -> dict
+    expansion_fetch_k(k, sections) -> int
     top_k_disorder_keys(scored_chunks, k) -> list[tuple[str, str]]
-    expand_sections(scored_chunks, top_k_keys, sections_by_disorder,
-                    score_field, sibling_score_fn) -> list[dict]
+    expand_sections(...) -> list[dict]
+    finish_search(...) -> list[dict]
 """
 from __future__ import annotations
+
+from collections import defaultdict
+from typing import Sequence
+
+
+def build_sections_by_disorder(
+    chunks: list[dict],
+    sections: Sequence[str] | None = None,
+) -> dict[tuple[str, str], dict[str, dict]]:
+    """Map (disorder_code, disorder_name) -> {section -> chunk} for expansion."""
+    allowlist = set(sections) if sections else None
+    result: dict[tuple[str, str], dict[str, dict]] = defaultdict(dict)
+    for chunk in chunks:
+        section = chunk.get("section", "")
+        if allowlist is not None and section not in allowlist:
+            continue
+        key = (chunk.get("disorder_code", ""), chunk.get("disorder_name", ""))
+        result[key][section] = chunk
+    return result
+
+
+def expansion_fetch_k(k: int, sections: Sequence[str] | None) -> int:
+    """Over-fetch multiplier so top-k distinct disorders can be found before expansion."""
+    return k * 4 if sections else k
 
 
 def top_k_disorder_keys(
@@ -79,9 +103,9 @@ def expand_sections(
             to assign injected siblings. Defaults to
             ``lambda seed: seed[score_field] * 0.999``.
         sections:
-            Optional allowlist of section names. When provided, only sibling
-            sections whose name is in this set are injected. When None, all
-            available sibling sections are injected (legacy behaviour).
+            Optional allowlist of section names. *scored_chunks* and
+            *sections_by_disorder* should already be restricted to this set;
+            any stray rows are skipped defensively.
 
     Returns:
         Expanded list of chunks. No hard length cap — every requested section
@@ -118,9 +142,7 @@ def expand_sections(
             sibling_score = sibling_score_fn(chunk)
             section_map = sections_by_disorder.get(key, {})
             for section, sibling in section_map.items():
-                if section == chunk.get("section"):
-                    continue
-                if sections is not None and section not in sections:
+                if section == section_name:
                     continue
                 sibling_id = sibling.get("id", "")
                 if sibling_id in seen_ids:
@@ -136,3 +158,29 @@ def expand_sections(
             expanded.append(chunk)
 
     return expanded
+
+
+def finish_search(
+    scored: list[dict],
+    k: int,
+    sections: Sequence[str] | None,
+    sections_by_disorder: dict[tuple[str, str], dict[str, dict]],
+    score_field: str,
+    *,
+    expand: bool = True,
+) -> list[dict]:
+    """
+    Shared tail for retriever search(): optionally expand top-k disorders to
+    their full section set, otherwise return scored rows as-is.
+    """
+    if not sections or not expand:
+        return scored[:k] if not sections else scored
+
+    top_keys = top_k_disorder_keys(scored, k)
+    return expand_sections(
+        scored_chunks=scored,
+        top_k_keys=top_keys,
+        sections_by_disorder=sections_by_disorder,
+        score_field=score_field,
+        sections=set(sections),
+    )

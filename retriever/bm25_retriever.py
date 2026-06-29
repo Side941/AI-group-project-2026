@@ -1,31 +1,26 @@
 # bm25_retriever.py
 
-from collections import defaultdict
-
 import numpy as np
 from rank_bm25 import BM25Okapi
 from components.config import CHUNKS_PATH
-from utils import load_chunks, tokenize
-from section_expander import top_k_disorder_keys, expand_sections
+from utils import load_chunks, tokenize, filter_chunks_by_sections
+from section_expander import (
+    build_sections_by_disorder,
+    expansion_fetch_k,
+    finish_search,
+)
 
 
 class BM25Retriever:
     def __init__(self, chunks=None, json_path=None, sections=None):
-        if chunks is None:
-            all_chunks = load_chunks(json_path or CHUNKS_PATH)
-        else:
-            all_chunks = chunks
+        all_chunks = chunks if chunks is not None else load_chunks(json_path or CHUNKS_PATH)
 
         self.sections: list[str] = list(sections) if sections else []
-        section_allowlist = set(self.sections) if self.sections else None
-
-        if section_allowlist is not None:
-            self.chunks = [
-                c for c in all_chunks
-                if c.get("section", "") in section_allowlist
-            ]
-        else:
-            self.chunks = all_chunks
+        self.chunks = (
+            filter_chunks_by_sections(all_chunks, self.sections)
+            if self.sections
+            else all_chunks
+        )
 
         # Tokenize using prompt_text (clean clinical text) not text
         # (embed_text with metadata headers). embed_text contains repeated
@@ -36,22 +31,19 @@ class BM25Retriever:
             for chunk in self.chunks
         ]
 
-        # Build BM25 index.
         self.bm25 = BM25Okapi(self.tokenized_chunks)
 
-        # Build disorder -> section -> chunk lookup for post-retrieval expansion.
-        # Populated only when sections are requested; keyed identically to
-        # RetrievalRetriever._sections_by_disorder so expand_sections() can be
-        # called with either retriever's map interchangeably.
-        self._sections_by_disorder: dict[tuple[str, str], dict[str, dict]] = defaultdict(dict)
-        if self.sections:
-            for chunk in all_chunks:
-                if chunk.get("section", "") not in section_allowlist:
-                    continue
-                key = (chunk.get("disorder_code", ""), chunk.get("disorder_name", ""))
-                self._sections_by_disorder[key][chunk.get("section", "")] = chunk
+        # Built lazily on first expanded search — not needed when expand=False.
+        self._sections_by_disorder: dict | None = None
 
         print(f"BM25 retriever ready: {len(self.chunks)} chunks indexed")
+
+    def _section_map(self) -> dict:
+        if self._sections_by_disorder is None:
+            self._sections_by_disorder = build_sections_by_disorder(
+                self.chunks, self.sections
+            )
+        return self._sections_by_disorder
 
     def _score_chunks(self, query: str, fetch_k: int) -> list[dict]:
         """Score all chunks against *query* and return the top *fetch_k* with
@@ -75,19 +67,13 @@ class BM25Retriever:
         if not query or not query.strip():
             return []
 
-        # Over-fetch so expansion has enough candidate seeds to find k
-        # distinct disorders before injecting siblings.
-        fetch_k = k * 4 if self.sections else k
-        scored = self._score_chunks(query, fetch_k)
-
-        if not self.sections or not expand:
-            return scored[:k] if not self.sections else scored
-
-        top_keys = top_k_disorder_keys(scored, k)
-        return expand_sections(
-            scored_chunks=scored,
-            top_k_keys=top_keys,
-            sections_by_disorder=self._sections_by_disorder,
-            score_field="bm25_score",
-            sections=set(self.sections),
+        scored = self._score_chunks(query, expansion_fetch_k(k, self.sections))
+        section_map = self._section_map() if (self.sections and expand) else {}
+        return finish_search(
+            scored,
+            k,
+            self.sections,
+            section_map,
+            "bm25_score",
+            expand=expand,
         )
