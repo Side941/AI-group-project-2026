@@ -1,14 +1,46 @@
 """
 config.py
 =========
-Shared configuration constants for the ICD-11 knowledge base pipeline.
+Shared configuration and project paths for the ICD-11 knowledge base pipeline.
+
+All filesystem paths are resolved relative to PROJECT_ROOT (the repo root),
+so imports work whether you run from the project root, retriever/, or notebooks/.
 """
+
+from __future__ import annotations
+
+from pathlib import Path
+
+# Repo root: parent of the components/ package directory.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def project_path(*parts: str) -> Path:
+    """Build an absolute path under the project root."""
+    return PROJECT_ROOT.joinpath(*parts)
+
+
+def resolve_path(path: str | Path | None = None, default: Path | None = None) -> Path:
+    """
+    Resolve a path against PROJECT_ROOT when it is not already absolute.
+
+    If path is None, default must be provided.
+    """
+    chosen = Path(path) if path is not None else default
+    if chosen is None:
+        raise ValueError("No path provided")
+    return chosen if chosen.is_absolute() else PROJECT_ROOT / chosen
+
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
-PDF_PATH    = "data/icd_11.pdf"
-CHUNKS_PATH = "knowledge_based/icd11_chunks.json"
-CHROMA_PATH = "knowledge_based/chroma_db"
+PDF_PATH     = project_path("data", "icd_11.pdf")
+CHUNKS_PATH  = project_path("knowledge_based", "icd11_chunks.json")
+CHROMA_PATH  = project_path("knowledge_based", "chroma_db")
+DATASET_PATH = project_path(
+    "datasets",
+    "Depression_Severity_Levels_Dataset.csv",
+)
 
 # ── Model / collection ─────────────────────────────────────────────────────────
 COLLECTION_NAME = "icd11_clinical"
@@ -61,7 +93,7 @@ SECTION_NORMALISE_MAP: dict[str, str] = {
     "boundary with normality":                                                 "Boundary with Normality",
     "boundary with normality (threshold)":                                     "Boundary with Normality",
     "course features":                                                         "Course Features",
-    "developmental presentations":                                             "Developmental Presentations",
+    "developmental presentations":                                           "Developmental Presentations",
     "culture-related features":                                                "Culture-Related Features",
     "sex- and/or gender-related features":                                     "Sex- and/or Gender-Related Features",
     "boundaries with other disorders and conditions":                          "Differential Diagnosis",

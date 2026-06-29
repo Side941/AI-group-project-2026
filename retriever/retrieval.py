@@ -12,6 +12,7 @@ Responsibilities
 Public API
 ----------
     initialise_retrieval(chroma_path, collection_name, embedding_model_name)
+    search_icd11(query_text, n_results, section_filter) -> list[dict]
     query_icd11(query_text, n_results, section_filter)
     get_icd11_context(query_text, n_results, section_filter, include_metadata) -> str
 """
@@ -34,7 +35,7 @@ def initialise_retrieval(
     print(f"Loading embedding model on {device} …")
     ingestion._embedding_model = SentenceTransformer(embedding_model_name, device=device)
 
-    chroma_client = chromadb.PersistentClient(path=chroma_path)
+    chroma_client = chromadb.PersistentClient(path=str(chroma_path))
     ingestion._collection = chroma_client.get_collection(collection_name)
     print(f"Ready. Collection '{collection_name}' has {ingestion._collection.count()} vectors.")
 
@@ -46,11 +47,14 @@ def _require_retrieval() -> None:
         )
 
 
-def query_icd11(
+def search_icd11(
     query_text: str,
-    n_results: int             = 5,
+    n_results: int = 5,
     section_filter: str | None = None,
-) -> None:
+) -> list[dict]:
+    """
+    Return dense retrieval results from ChromaDB as structured chunk dicts.
+    """
     _require_retrieval()
 
     query_embedding = ingestion._embedding_model.encode(
@@ -66,22 +70,43 @@ def query_icd11(
         include=["documents", "metadatas", "distances"],
     )
 
+    rows: list[dict] = []
+    for i in range(len(results["documents"][0])):
+        meta = results["metadatas"][0][i]
+        doc = results["documents"][0][i]
+        dist = results["distances"][0][i]
+        rows.append({
+            "id": f"{meta['disorder_code']}_{meta['section'].lower().replace(' ', '_')}",
+            "text": doc,
+            "prompt_text": doc,
+            "dense_score": 1 - dist,
+            **meta,
+        })
+    return rows
+
+
+def query_icd11(
+    query_text: str,
+    n_results: int             = 5,
+    section_filter: str | None = None,
+) -> None:
+    results = search_icd11(
+        query_text=query_text,
+        n_results=n_results,
+        section_filter=section_filter,
+    )
+
     print(f"Query : '{query_text}'")
     if section_filter:
         print(f"Filter: section = '{section_filter}'")
     print("-" * 65)
 
-    for i in range(len(results["documents"][0])):
-        meta = results["metadatas"][0][i]
-        doc  = results["documents"][0][i]
-        dist = results["distances"][0][i]
-        sim  = 1 - dist
-
-        print(f"[{i+1}] {meta['disorder_name']} ({meta['disorder_code']})")
-        print(f"     Section    : {meta['section']}")
-        print(f"     Domain     : {meta['domain']}")
-        print(f"     Similarity : {sim:.4f}")
-        print(f"     Text       : {doc}")
+    for i, row in enumerate(results, start=1):
+        print(f"[{i}] {row['disorder_name']} ({row['disorder_code']})")
+        print(f"     Section    : {row['section']}")
+        print(f"     Domain     : {row['domain']}")
+        print(f"     Similarity : {row['dense_score']:.4f}")
+        print(f"     Text       : {row['text']}")
         print()
 
 
@@ -91,34 +116,22 @@ def get_icd11_context(
     section_filter: str | None = None,
     include_metadata: bool     = True,
 ) -> str:
-    _require_retrieval()
-
-    query_embedding = ingestion._embedding_model.encode(
-        [query_text], normalize_embeddings=True,
-    ).tolist()
-
-    where = {"section": {"$eq": section_filter}} if section_filter else None
-
-    results = ingestion._collection.query(
-        query_embeddings=query_embedding,
+    results = search_icd11(
+        query_text=query_text,
         n_results=n_results,
-        where=where,
-        include=["documents", "metadatas"],
+        section_filter=section_filter,
     )
 
     parts: list[str] = []
-    for i in range(len(results["documents"][0])):
-        meta = results["metadatas"][0][i]
-        doc  = results["documents"][0][i]
-
+    for row in results:
         if include_metadata:
             header = (
-                f"[{meta['disorder_name']} ({meta['disorder_code']}) "
-                f"— {meta['section']}]"
+                f"[{row['disorder_name']} ({row['disorder_code']}) "
+                f"— {row['section']}]"
             )
-            parts.append(f"{header}\n{doc}")
+            parts.append(f"{header}\n{row['text']}")
         else:
-            parts.append(doc)
+            parts.append(row["text"])
 
     return "\n\n".join(parts)
 

@@ -2,17 +2,14 @@
 
 import numpy as np
 from rank_bm25 import BM25Okapi
+from components.config import CHUNKS_PATH
 from utils import load_chunks, tokenize
 
-# BM25Retriever class for searching text chunks using BM25 algorithm
+
 class BM25Retriever:
     def __init__(self, chunks=None, json_path=None):
-        # Load chunks from JSON if not provided
         if chunks is None:
-            if json_path:
-                self.chunks = load_chunks(json_path)
-            else:
-                self.chunks = load_chunks()
+            self.chunks = load_chunks(json_path or CHUNKS_PATH)
         else:
             self.chunks = chunks
 

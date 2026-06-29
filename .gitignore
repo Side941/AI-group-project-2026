@@ -7,3 +7,5 @@ venv/
 knowledge_based/chroma_db/
 notebooks/knowledge_based/chroma_db/
 *.csv
+/anaconda_projects
+/.virtual_documents

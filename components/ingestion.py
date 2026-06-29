@@ -77,7 +77,7 @@ def run_ingestion(
     print(f"Output dims: {_embedding_model.get_sentence_embedding_dimension()}")
 
     # ── ChromaDB client ───────────────────────────────────────────────────────
-    chroma_client = chromadb.PersistentClient(path=chroma_path)
+    chroma_client = chromadb.PersistentClient(path=str(chroma_path))
     print(f"\nChromaDB path: {chroma_path}")
 
     existing_names = [c.name for c in chroma_client.list_collections()]
@@ -99,7 +99,7 @@ def run_ingestion(
     print(f"Collection ready: '{collection_name}'  ({_collection.count()} vectors)")
 
     # ── Load chunks ───────────────────────────────────────────────────────────
-    with open(chunks_path, "r", encoding="utf-8") as f:
+    with open(str(chunks_path), "r", encoding="utf-8") as f:
         chunks = json.load(f)
     print(f"Loaded {len(chunks)} chunks from {chunks_path}")
 

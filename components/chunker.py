@@ -23,14 +23,24 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from config import (
-    CONTENT_END_PAGE,
-    CONTENT_START_PAGE,
-    CHUNKS_PATH,
-    PDF_PATH,
-    DOMAIN_MAP,
-    SECTION_NORMALISE_MAP,
-)
+try:
+    from config import (        # when run directly: python components/chunker.py
+        CONTENT_END_PAGE,
+        CONTENT_START_PAGE,
+        CHUNKS_PATH,
+        PDF_PATH,
+        DOMAIN_MAP,
+        SECTION_NORMALISE_MAP,
+    )
+except ModuleNotFoundError:
+    from components.config import (   # when imported as a package
+        CONTENT_END_PAGE,
+        CONTENT_START_PAGE,
+        CHUNKS_PATH,
+        PDF_PATH,
+        DOMAIN_MAP,
+        SECTION_NORMALISE_MAP,
+    )
 
 # ── Compiled regex patterns ────────────────────────────────────────────────────
 _SECTION_PATTERNS = [
