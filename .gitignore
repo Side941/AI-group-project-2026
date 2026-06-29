@@ -9,3 +9,9 @@ notebooks/knowledge_based/chroma_db/
 *.csv
 /anaconda_projects
 /.virtual_documents
+/components/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
