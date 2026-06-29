@@ -4,3 +4,9 @@ __pycache__/
 .DS_Store
 *.pyc
 /knowledge_based/data/chroma_db
+/knowledge_based/data/icd_11.pdf
+/anaconda_projects
+/.virtual_documents
+/components/.ipynb_checkpoints
+/knowledge_based/chroma_db
+/retriever/.ipynb_checkpoints
