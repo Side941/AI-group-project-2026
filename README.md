@@ -7,7 +7,8 @@ AI-group-project-2026/
 ├── components/                 # Knowledge-base build pipeline
 │   ├── config.py               # Shared config + repo-root path resolution
 │   ├── chunker.py              # Step 1: ICD-11 PDF → JSON chunks
-│   └── ingestion.py            # Step 2: JSON chunks → ChromaDB vectors
+│   ├── ingestion.py            # Step 2: JSON chunks → ChromaDB vectors
+│   └── main.py                 # Run chunking + ingestion in one command
 ├── retriever/                  # Retrieval layer
 │   ├── paths.py                # Import-path bootstrap for scripts
 │   ├── utils.py                # Load chunks, tokenize for BM25
@@ -59,6 +60,15 @@ python retriever/test.py
 
 **Knowledge-base pipeline** (from project root):
 ```bash
+python -m components.main
+
+# Optional: ingestion only (reuse existing chunks)
+python -m components.main --skip-chunking
+
+# Optional: force re-ingestion into Chroma
+python -m components.main --rebuild
+
+# Existing step-by-step commands
 python -m components.chunker
 python -m components.ingestion
 ```

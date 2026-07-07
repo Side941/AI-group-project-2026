@@ -20,11 +20,42 @@ from collections import defaultdict
 from typing import Sequence
 
 
+def _chunk_uid(chunk: dict) -> str:
+    """Stable fallback id for chunk rows that do not carry an explicit 'id'."""
+    explicit = chunk.get("id", "")
+    if explicit:
+        return explicit
+    code = chunk.get("disorder_code", "")
+    name = chunk.get("disorder_name", "")
+    section = chunk.get("section", "")
+    part = chunk.get("chunk_part", 1)
+    text = chunk.get("text", "")
+    return f"{code}|{name}|{section}|{part}|{hash(text)}"
+
+
+def _section_chunk_rank(chunk: dict) -> tuple[int, int]:
+    """
+    Sort key for choosing one representative chunk per section.
+
+    Prefer chunk_part=1 (start of section), then prefer larger chunk length
+    so the representative carries richer context.
+    """
+    part = int(chunk.get("chunk_part", 1))
+    words = int(chunk.get("word_count", 0))
+    return (part, -words)
+
+
 def build_sections_by_disorder(
     chunks: list[dict],
     sections: Sequence[str] | None = None,
 ) -> dict[tuple[str, str], dict[str, dict]]:
-    """Map (disorder_code, disorder_name) -> {section -> chunk} for expansion."""
+    """
+    Map (disorder_code, disorder_name) -> {section -> representative_chunk}.
+
+    When section text is split into multiple sub-chunks, keep a single
+    representative chunk per section to avoid response inflation during
+    section expansion.
+    """
     allowlist = set(sections) if sections else None
     result: dict[tuple[str, str], dict[str, dict]] = defaultdict(dict)
     for chunk in chunks:
@@ -32,7 +63,9 @@ def build_sections_by_disorder(
         if allowlist is not None and section not in allowlist:
             continue
         key = (chunk.get("disorder_code", ""), chunk.get("disorder_name", ""))
-        result[key][section] = chunk
+        existing = result[key].get(section)
+        if existing is None or _section_chunk_rank(chunk) < _section_chunk_rank(existing):
+            result[key][section] = chunk
     return result
 
 
@@ -129,7 +162,7 @@ def expand_sections(
         if sections is not None and section_name not in sections:
             continue
 
-        chunk_id = chunk.get("id", "")
+        chunk_id = _chunk_uid(chunk)
         if chunk_id in seen_ids:
             continue
 
@@ -144,7 +177,7 @@ def expand_sections(
             for section, sibling in section_map.items():
                 if section == section_name:
                     continue
-                sibling_id = sibling.get("id", "")
+                sibling_id = _chunk_uid(sibling)
                 if sibling_id in seen_ids:
                     continue
                 sibling_out = sibling.copy()

@@ -48,8 +48,12 @@ EMBEDDING_MODEL = "FremyCompany/BioLORD-2023"
 BATCH_SIZE      = 64
 
 # ── PDF page range — clinical content starts around page 70 ───────────────────
+# End before appendix / ICD-10 crosswalk tables (~page 675 in the CDDR PDF).
 CONTENT_START_PAGE = 70
-CONTENT_END_PAGE   = 852
+CONTENT_END_PAGE   = 676
+
+# Flag disorders with more than this many chunks in the post-chunking report.
+CHUNK_COUNT_WARNING_THRESHOLD = 30
 
 # ── ICD-11 code prefix → clinical domain ──────────────────────────────────────
 DOMAIN_MAP: dict[str, str] = {
