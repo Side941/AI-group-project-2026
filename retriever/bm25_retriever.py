@@ -30,6 +30,9 @@ class BM25Retriever:
             tokenize(chunk.get("prompt_text") or chunk["text"])
             for chunk in self.chunks
         ]
+        self.disorder_name_tokens = [
+            set(tokenize(chunk.get("disorder_name", ""))) for chunk in self.chunks
+        ]
 
         self.bm25 = BM25Okapi(self.tokenized_chunks)
 
@@ -52,15 +55,34 @@ class BM25Retriever:
         if not tokenized_query:
             return []
 
-        scores = self.bm25.get_scores(tokenized_query)
-        top_indices = np.argsort(scores)[::-1][:fetch_k]
+        base_scores = self.bm25.get_scores(tokenized_query)
+        query_token_set = set(tokenized_query)
+        adjusted_scores = np.array(base_scores, dtype=float)
+        for idx, name_tokens in enumerate(self.disorder_name_tokens):
+            if not name_tokens:
+                continue
+            overlap = len(query_token_set & name_tokens)
+            if overlap:
+                # Small lexical prior so disorder labels matching the query are
+                # preferred over generic chunks with broad vocabulary overlap.
+                adjusted_scores[idx] += 0.75 * overlap
+
+        ranked_indices = np.argsort(adjusted_scores)[::-1]
 
         results = []
-        for idx in top_indices:
-            if scores[idx] > 0:
+        seen_chunk_ids: set[str] = set()
+        for idx in ranked_indices:
+            if adjusted_scores[idx] > 0:
                 chunk = self.chunks[idx].copy()
-                chunk["bm25_score"] = float(scores[idx])
+                chunk_id = chunk.get("id")
+                if chunk_id and chunk_id in seen_chunk_ids:
+                    continue
+                if chunk_id:
+                    seen_chunk_ids.add(chunk_id)
+                chunk["bm25_score"] = float(adjusted_scores[idx])
                 results.append(chunk)
+                if len(results) >= fetch_k:
+                    break
         return results
 
     def search(self, query: str, k: int = 5, *, expand: bool = True) -> list[dict]:

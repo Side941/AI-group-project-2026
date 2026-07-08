@@ -4,11 +4,17 @@ from pathlib import Path
 from typing import Sequence
 
 import nltk  # type: ignore
+from nltk.corpus import stopwords  # type: ignore
+from nltk.stem import PorterStemmer  # type: ignore
 
 from components.config import CHUNKS_PATH, resolve_path
 
 nltk.download("punkt", quiet=True)
 nltk.download("punkt_tab", quiet=True)
+nltk.download("stopwords", quiet=True)
+
+_STEMMER = PorterStemmer()
+_STOPWORDS = set(stopwords.words("english"))
 
 
 def load_chunks(json_path: str | Path | None = None) -> list[dict]:
@@ -45,5 +51,24 @@ def filter_chunks_by_sections(
 
 
 def tokenize(text: str) -> list[str]:
+    """
+    BM25-friendly normalization:
+    - lowercase
+    - drop punctuation/very short tokens
+    - drop stop words (e.g. "i", "so", "and")
+    - stem to reduce sparse variants ("depressed" -> "depress")
+    """
     tokens = nltk.word_tokenize(text.lower())
-    return [token for token in tokens if token not in string.punctuation]
+    normalized: list[str] = []
+    for token in tokens:
+        if token in string.punctuation:
+            continue
+        if len(token) <= 2:
+            continue
+        if token in _STOPWORDS:
+            continue
+        # Keep alpha-numeric tokens that carry semantics ("icd11", "6a72").
+        stemmed = _STEMMER.stem(token)
+        if stemmed:
+            normalized.append(stemmed)
+    return normalized
