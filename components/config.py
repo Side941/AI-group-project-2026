@@ -97,6 +97,10 @@ RETRIEVAL_SECTIONS: list[str] = [
     "Boundary with Normality",
 ]
 
+# ICD-11 disorder-code prefixes for mood / depressive disorders (6A6–6A8).
+# Used by the depression-severity notebook to avoid retrieving unrelated domains.
+MOOD_DISORDER_PREFIXES: tuple[str, ...] = ("6A6", "6A7", "6A8")
+
 # ── Section heading normalisation map ─────────────────────────────────────────
 SECTION_NORMALISE_MAP: dict[str, str] = {
     "essential (required) features":                                           "Essential Features",

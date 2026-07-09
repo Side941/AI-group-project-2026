@@ -50,6 +50,17 @@ def filter_chunks_by_sections(
     return [c for c in chunks if c.get("section", "") in allowlist]
 
 
+def filter_chunks_by_disorder_codes(
+    chunks: list[dict],
+    prefixes: Sequence[str],
+) -> list[dict]:
+    """Return only chunks whose disorder_code starts with one of *prefixes*."""
+    return [
+        c for c in chunks
+        if any(str(c.get("disorder_code", "")).startswith(p) for p in prefixes)
+    ]
+
+
 def tokenize(text: str) -> list[str]:
     """
     BM25-friendly normalization:
