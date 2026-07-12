@@ -42,14 +42,19 @@ for q in queries:
 
 # ── Hybrid ────────────────────────────────────────────────────────────────────
 print("\n" + "=" * 70)
-print("HYBRID RETRIEVER (BM25 + retrieval.py dense, alpha=0.3)")
+print("HYBRID RETRIEVER (RRF: BM25 + dense, alpha=0.3)")
 print("=" * 70)
 hybrid = HybridRetriever(json_path=CHUNKS_PATH, alpha=0.3)
 for q in queries:
     print(f"\nQuery: '{q}'")
     results = hybrid.search(q, k=3)
     for i, r in enumerate(results):
-        print(f"  {i+1}. Hybrid: {r['hybrid_score']:.4f} | BM25: {r['bm25_norm']:.4f} | Dense: {r['dense_norm']:.4f}")
+        bm25_rank = r.get("bm25_rank")
+        dense_rank = r.get("dense_rank")
+        print(
+            f"  {i+1}. Hybrid: {r['hybrid_score']:.4f} | "
+            f"BM25 rank: {bm25_rank} | Dense rank: {dense_rank}"
+        )
         print(f"     {r.get('prompt_text', r['text'])[:80]}...")
 
 # ── Boundary with Normality filter ────────────────────────────────────────────

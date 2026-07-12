@@ -37,10 +37,32 @@ def resolve_path(path: str | Path | None = None, default: Path | None = None) ->
 PDF_PATH     = project_path("data", "icd_11.pdf")
 CHUNKS_PATH  = project_path("knowledge_based", "icd11_chunks.json")
 CHROMA_PATH  = project_path("knowledge_based", "chroma_db")
-DATASET_PATH = project_path(
-    "datasets",
-    "Depression_Severity_Levels_Dataset.csv",
-)
+# Hugging Face mental-health corpus (local cache + Hub fallback).
+HF_DATASET_REPO = "ourafla/Mental-Health_Text-Classification_Dataset"
+HF_TRAIN_FILE = "mental_heath_unbanlanced.csv"
+HF_TEST_FILE = "mental_health_combined_test.csv"
+DATASET_TRAIN_PATH = project_path("datasets", HF_TRAIN_FILE)
+DATASET_TEST_PATH = project_path("datasets", HF_TEST_FILE)
+
+# Stratified RAG evaluation subset (committed; regenerate via datasets/build_rag_eval_subset.py).
+RAG_EVAL_SUBSET_PATH = project_path("datasets", "rag_eval_subset.csv")
+RAG_EVAL_META_PATH = project_path("datasets", "rag_eval_subset.meta.json")
+RAG_EVAL_LABELS: tuple[str, ...] = ("suicidal", "depression", "normal")
+RAG_EVAL_EXCLUDE: tuple[str, ...] = ("anxiety",)
+RAG_EVAL_PER_CLASS = 150
+RAG_EVAL_SEED = 42
+RAG_EVAL_MIN_CHARS = 40
+RAG_EVAL_MAX_CHARS = 2000
+
+# Stratified development slice for prompt/k tuning (subset of the final eval set).
+# Use eval_mode="dev" in the notebook while iterating; switch to "final" for reporting.
+RAG_DEV_SLICE_PATH = project_path("datasets", "rag_dev_slice.csv")
+RAG_DEV_META_PATH = project_path("datasets", "rag_dev_slice.meta.json")
+RAG_DEV_PER_CLASS = 10
+RAG_DEV_SEED = 43
+
+# Default notebook dataset path points at the final eval set.
+DATASET_PATH = RAG_EVAL_SUBSET_PATH
 
 # ── Model / collection ─────────────────────────────────────────────────────────
 COLLECTION_NAME = "icd11_clinical"
@@ -98,7 +120,7 @@ RETRIEVAL_SECTIONS: list[str] = [
 ]
 
 # ICD-11 disorder-code prefixes for mood / depressive disorders (6A6–6A8).
-# Used by the depression-severity notebook to avoid retrieving unrelated domains.
+# Used by the RAG risk-detection notebook to avoid retrieving unrelated domains.
 MOOD_DISORDER_PREFIXES: tuple[str, ...] = ("6A6", "6A7", "6A8")
 
 # ── Section heading normalisation map ─────────────────────────────────────────

@@ -7,6 +7,10 @@ venv/
 knowledge_based/chroma_db/
 notebooks/knowledge_based/chroma_db/
 *.csv
+!datasets/rag_eval_subset.csv
+!datasets/rag_eval_subset.meta.json
+!datasets/rag_dev_slice.csv
+!datasets/rag_dev_slice.meta.json
 /anaconda_projects
 /.virtual_documents
 /components/.ipynb_checkpoints

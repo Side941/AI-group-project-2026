@@ -1,0 +1,55 @@
+{
+  "artifact": "rag_eval_subset",
+  "csv_sha256": "bbfd15c866c983c79a190918484e99b688ec7c8ed8aea5fee1e5264ba0f109e2",
+  "exclude_labels": [
+    "anxiety"
+  ],
+  "hf_repo": "ourafla/Mental-Health_Text-Classification_Dataset",
+  "label_counts_clean": {
+    "depression": 14178,
+    "normal": 12073,
+    "suicidal": 10753
+  },
+  "label_counts_raw": {
+    "anxiety": 5751,
+    "depression": 14754,
+    "normal": 18639,
+    "suicidal": 11460
+  },
+  "labels": [
+    "suicidal",
+    "depression",
+    "normal"
+  ],
+  "load_mode": "local",
+  "max_chars": 2000,
+  "min_chars": 40,
+  "output_csv": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\rag_eval_subset.csv",
+  "output_label_counts": {
+    "depression": 150,
+    "normal": 150,
+    "suicidal": 150
+  },
+  "output_rows": 450,
+  "per_class": 150,
+  "rows_after_dedupe": 37004,
+  "rows_after_exclude": 44853,
+  "rows_after_label_filter": 44853,
+  "rows_after_length_filter": 37728,
+  "rows_dropped_dedupe": 724,
+  "rows_dropped_empty": 1,
+  "rows_dropped_exclude": 5751,
+  "rows_dropped_length": 7124,
+  "rows_raw": 50604,
+  "seed": 42,
+  "test_input": {
+    "exists": true,
+    "path": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\mental_health_combined_test.csv",
+    "size_bytes": 789693
+  },
+  "train_input": {
+    "exists": true,
+    "path": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\mental_heath_unbanlanced.csv",
+    "size_bytes": 20801685
+  }
+}

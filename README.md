@@ -15,7 +15,7 @@ AI-group-project-2026/
 │   ├── bm25_retriever.py       # Sparse keyword retrieval
 │   ├── retrieval.py            # ChromaDB dense retrieval API
 │   ├── retrieval_retriever.py  # Dense retriever + same-disorder expansion
-│   ├── hybrid_retriever.py     # BM25 + dense fusion
+│   ├── hybrid_retriever.py     # BM25 + dense fusion (weighted RRF)
 │   └── test.py                 # Smoke test for all retrievers
 ├── notebooks/
 │   └── multi_class_rag.ipynb   # Full RAG classification experiment
@@ -25,7 +25,13 @@ AI-group-project-2026/
 │   ├── icd11_chunks.json       # Extracted clinical chunks
 │   └── chroma_db/              # Vector store (gitignored)
 ├── datasets/
-│   └── Depression_Severity_Levels_Dataset.csv
+│   ├── build_rag_eval_subset.py   # Reproducible eval + dev-slice builder
+│   ├── rag_eval_subset.csv        # Final reporting set (450 rows)
+│   ├── rag_eval_subset.meta.json  # Provenance + SHA256 of the final set
+│   ├── rag_dev_slice.csv          # Prompt/k tuning slice (30 rows)
+│   ├── rag_dev_slice.meta.json    # Provenance + parent row_ids
+│   ├── mental_heath_unbanlanced.csv          # Optional local HF cache (gitignored)
+│   └── mental_health_combined_test.csv       # Optional local HF cache (gitignored)
 ├── requirements.txt
 └── README.md
 ```
@@ -49,7 +55,33 @@ pip install -r requirements.txt
 - `data/icd_11.pdf`
 - `knowledge_based/icd11_chunks.json` (from chunker, or provided)
 - `knowledge_based/chroma_db/` (from ingestion, or provided)
-- `datasets/Depression_Severity_Levels_Dataset.csv`
+- `datasets/rag_eval_subset.csv` (committed final set; regenerate below if needed)
+- `datasets/rag_dev_slice.csv` (committed 30-post tuning slice)
+
+## RAG evaluation sets
+
+Two committed stratified artifacts (anxiety excluded):
+
+| File | Size | Purpose |
+|------|------|---------|
+| `rag_dev_slice.csv` | 30 (10/class) | Prompt / top-k / alpha tuning (`eval_mode="dev"`) |
+| `rag_eval_subset.csv` | 450 (150/class) | Final reported results (`eval_mode="final"`) |
+
+The dev slice is carved from the final set (see `parent_row_id`), so tuning posts are a transparent subset of the reporting set. Labels: `suicidal` | `depression` | `normal`.
+
+In the notebook, switch modes via `CFG["eval_mode"]` (`"dev"` or `"final"`). Default is `"dev"`. Do not keep editing prompts after switching to `"final"`.
+
+Regenerate both (deterministic; final seed `42`, dev seed `43`):
+
+```bash
+python datasets/build_rag_eval_subset.py
+```
+
+Load order for the builder:
+1. Local CSVs `datasets/mental_heath_unbanlanced.csv` + `datasets/mental_health_combined_test.csv` if both exist
+2. Otherwise download from Hugging Face (`ourafla/Mental-Health_Text-Classification_Dataset`) and cache those CSVs locally
+
+Raw HF dumps stay gitignored; the eval/dev CSVs and their `.meta.json` files are tracked so teammates can run without re-downloading.
 
 ## Running
 
@@ -73,7 +105,7 @@ python -m components.chunker
 python -m components.ingestion
 ```
 
-**Notebook experiment** — open `notebooks/multi_class_rag.ipynb` and run cell 1 first. It auto-detects the project root.
+**Notebook experiment** — open `notebooks/multi_class_rag.ipynb` and run cell 1 first. It auto-detects the project root and loads `rag_eval_subset.csv`.
 
 ## Path configuration
 
@@ -85,9 +117,12 @@ Edit paths in one place: `components/config.py`
 | `PDF_PATH` | `data/icd_11.pdf` |
 | `CHUNKS_PATH` | `knowledge_based/icd11_chunks.json` |
 | `CHROMA_PATH` | `knowledge_based/chroma_db` |
-| `DATASET_PATH` | `datasets/Depression_Severity_Levels_Dataset.csv` |
+| `RAG_EVAL_SUBSET_PATH` / `DATASET_PATH` | `datasets/rag_eval_subset.csv` (final) |
+| `RAG_DEV_SLICE_PATH` | `datasets/rag_dev_slice.csv` (tuning) |
+| `DATASET_TRAIN_PATH` / `DATASET_TEST_PATH` | Local HF mental-health CSV caches |
 
 ## Notes
 - Default Top-K is 5, adjustable via the `k` parameter in `search()`.
 - Runs on CPU by default; uses GPU when available.
 - Retriever types: `bm25`, `hybrid`, `retrieval`.
+- Hybrid fusion uses weighted Reciprocal Rank Fusion (RRF).
