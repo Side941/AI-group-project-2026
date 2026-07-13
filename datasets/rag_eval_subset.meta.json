@@ -33,7 +33,6 @@
   "output_rows": 450,
   "per_class": 150,
   "rows_after_dedupe": 37004,
-  "rows_after_exclude": 44853,
   "rows_after_label_filter": 44853,
   "rows_after_length_filter": 37728,
   "rows_dropped_dedupe": 724,

@@ -48,6 +48,6 @@
   ],
   "parent_sha256": "bbfd15c866c983c79a190918484e99b688ec7c8ed8aea5fee1e5264ba0f109e2",
   "per_class": 10,
-  "purpose": "prompt/k tuning only; switch notebook eval_mode to final for reporting",
+  "purpose": "prompt/k tuning only; use eval_mode=final for reporting",
   "seed": 43
 }
