@@ -18,7 +18,9 @@ AI-group-project-2026/
 │   ├── hybrid_retriever.py     # BM25 + dense fusion (weighted RRF)
 │   └── test.py                 # Smoke test for all retrievers
 ├── notebooks/
-│   └── multi_class_rag.ipynb   # Full RAG classification experiment
+│   ├── 01_kb_pipeline_demo.ipynb   # Documented KB pipeline (chunk + ingest + inspect)
+│   ├── 02_dataset_prep_demo.ipynb  # Documented eval/dev dataset builder + inspect
+│   └── multi_class_rag.ipynb       # Full RAG classification experiment
 ├── data/
 │   └── icd_11.pdf              # Source ICD-11 PDF (not committed)
 ├── knowledge_based/
@@ -105,7 +107,13 @@ python -m components.chunker
 python -m components.ingestion
 ```
 
-**Notebook experiment** — open `notebooks/multi_class_rag.ipynb` and run cell 1 first. It auto-detects the project root and loads `rag_eval_subset.csv`.
+**Notebook experiment** — open `notebooks/multi_class_rag.ipynb` and run cell 1 first. It auto-detects the project root.
+
+**Demo notebooks** (documented pipelines with explanations + inspection; CLIs remain for automation):
+- `notebooks/01_kb_pipeline_demo.ipynb` — KB orchestration (chunk → ingest) as in `components/main.py`
+- `notebooks/02_dataset_prep_demo.ipynb` — full eval/dev dataset builder stages as in `datasets/build_rag_eval_subset.py`
+
+Rebuild flags default to off / write-on where noted; read the markdown cells before flipping them.
 
 ## Path configuration
 

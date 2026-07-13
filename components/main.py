@@ -1,11 +1,17 @@
 """
 main.py
 =======
-Single entrypoint for the ICD-11 knowledge-base pipeline.
+CLI entrypoint for the ICD-11 knowledge-base pipeline.
 
 Runs:
 1) chunking  (PDF -> JSON chunks)
 2) ingestion (JSON chunks -> ChromaDB vectors)
+
+Documented walkthrough (orchestration + inspection + explanations):
+    notebooks/01_kb_pipeline_demo.ipynb
+
+Prefer that notebook for thesis-facing explanation. This file remains the
+automation entrypoint (`python -m components.main`).
 """
 
 from __future__ import annotations

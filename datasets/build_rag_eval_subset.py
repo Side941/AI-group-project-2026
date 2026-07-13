@@ -1,17 +1,19 @@
 """
 build_rag_eval_subset.py
 ========================
-Build reproducible stratified RAG evaluation artifacts from the
-ourafla/Mental-Health_Text-Classification_Dataset corpus:
+CLI entrypoint to build reproducible stratified RAG evaluation artifacts:
 
 1) rag_eval_subset.csv  — final reporting set (150/class = 450)
 2) rag_dev_slice.csv    — prompt/k tuning slice drawn from (1) (10/class = 30)
 
+Documented walkthrough (full stage logic + inspection + explanations):
+    notebooks/02_dataset_prep_demo.ipynb
+
+Prefer that notebook for thesis-facing explanation. This file remains the
+automation entrypoint (`python datasets/build_rag_eval_subset.py`).
+
 Prefer local CSVs under datasets/; fall back to the Hugging Face Hub.
 Re-running with the same inputs and seeds must produce identical CSVs.
-
-Usage (from repo root):
-    python datasets/build_rag_eval_subset.py
 """
 
 from __future__ import annotations
