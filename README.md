@@ -19,9 +19,8 @@ AI-group-project-2026/
 │   ├── 01_kb_pipeline_demo.ipynb   # Documented KB pipeline (chunk + ingest + inspect)
 │   ├── 02_dataset_prep_demo.ipynb  # Documented eval/dev dataset builder + inspect
 │   └── multi_class_rag.ipynb       # Full RAG classification experiment
-├── data/
-│   └── icd_11.pdf              # Source ICD-11 PDF (not committed)
-├── knowledge_based/
+├── knowledge_base/
+│   ├── icd_11.pdf              # Source ICD-11 PDF (typically not committed)
 │   ├── icd11_chunks.json       # Extracted clinical chunks
 │   └── chroma_db/              # Vector store (gitignored)
 ├── datasets/
@@ -52,9 +51,9 @@ pip install -r requirements.txt
 ```
 
 **3. Place required data files**
-- `data/icd_11.pdf`
-- `knowledge_based/icd11_chunks.json` (from chunker, or provided)
-- `knowledge_based/chroma_db/` (from ingestion, or provided)
+- `knowledge_base/icd_11.pdf`
+- `knowledge_base/icd11_chunks.json` (from chunker, or provided)
+- `knowledge_base/chroma_db/` (from ingestion, or provided)
 - `datasets/rag_eval_subset.csv` (committed final set; regenerate below if needed)
 - `datasets/rag_dev_slice.csv` (committed 30-post tuning slice)
 
@@ -120,9 +119,9 @@ Edit paths in one place: `components/config.py`
 | Constant | Points to |
 |----------|-----------|
 | `PROJECT_ROOT` | Repo root (auto-detected) |
-| `PDF_PATH` | `data/icd_11.pdf` |
-| `CHUNKS_PATH` | `knowledge_based/icd11_chunks.json` |
-| `CHROMA_PATH` | `knowledge_based/chroma_db` |
+| `PDF_PATH` | `knowledge_base/icd_11.pdf` |
+| `CHUNKS_PATH` | `knowledge_base/icd11_chunks.json` |
+| `CHROMA_PATH` | `knowledge_base/chroma_db` |
 | `RAG_EVAL_SUBSET_PATH` / `DATASET_PATH` | `datasets/rag_eval_subset.csv` (final) |
 | `RAG_DEV_SLICE_PATH` | `datasets/rag_dev_slice.csv` (tuning) |
 | `DATASET_TRAIN_PATH` / `DATASET_TEST_PATH` | Local HF mental-health CSV caches |

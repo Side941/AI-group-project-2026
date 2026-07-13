@@ -34,9 +34,9 @@ def resolve_path(path: str | Path | None = None, default: Path | None = None) ->
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
-PDF_PATH     = project_path("data", "icd_11.pdf")
-CHUNKS_PATH  = project_path("knowledge_based", "icd11_chunks.json")
-CHROMA_PATH  = project_path("knowledge_based", "chroma_db")
+PDF_PATH     = project_path("knowledge_base", "icd_11.pdf")
+CHUNKS_PATH  = project_path("knowledge_base", "icd11_chunks.json")
+CHROMA_PATH  = project_path("knowledge_base", "chroma_db")
 # Hugging Face mental-health corpus (local cache + Hub fallback).
 HF_DATASET_REPO = "ourafla/Mental-Health_Text-Classification_Dataset"
 HF_TRAIN_FILE = "mental_heath_unbanlanced.csv"

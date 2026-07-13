@@ -4,8 +4,9 @@ __pycache__/
 .DS_Store
 venv/
 .vscode/
-knowledge_based/chroma_db/
-notebooks/knowledge_based/chroma_db/
+knowledge_base/chroma_db/
+knowledge_base/icd_11.pdf
+notebooks/knowledge_base/chroma_db/
 *.csv
 !datasets/rag_eval_subset.csv
 !datasets/rag_eval_subset.meta.json
