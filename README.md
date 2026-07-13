@@ -10,13 +10,12 @@ AI-group-project-2026/
 │   ├── ingestion.py            # Step 2: JSON chunks → ChromaDB vectors
 │   └── main.py                 # Run chunking + ingestion in one command
 ├── retriever/                  # Retrieval layer
-│   ├── paths.py                # Import-path bootstrap for scripts
 │   ├── utils.py                # Load chunks, tokenize for BM25
 │   ├── bm25_retriever.py       # Sparse keyword retrieval
 │   ├── retrieval.py            # ChromaDB dense retrieval API
 │   ├── retrieval_retriever.py  # Dense retriever + same-disorder expansion
 │   ├── hybrid_retriever.py     # BM25 + dense fusion (weighted RRF)
-│   └── test.py                 # Smoke test for all retrievers
+│   └── section_expander.py     # Post-retrieval section completion
 ├── notebooks/
 │   ├── 01_kb_pipeline_demo.ipynb   # Documented KB pipeline (chunk + ingest + inspect)
 │   ├── 02_dataset_prep_demo.ipynb  # Documented eval/dev dataset builder + inspect
@@ -87,11 +86,6 @@ Raw HF dumps stay gitignored; the eval/dev CSVs and their `.meta.json` files are
 
 ## Running
 
-**Retriever smoke test** (from anywhere):
-```bash
-python retriever/test.py
-```
-
 **Knowledge-base pipeline** (from project root):
 ```bash
 python -m components.main
@@ -105,6 +99,11 @@ python -m components.main --rebuild
 # Existing step-by-step commands
 python -m components.chunker
 python -m components.ingestion
+```
+
+**Dataset rebuild** (eval + dev slices):
+```bash
+python datasets/build_rag_eval_subset.py
 ```
 
 **Notebook experiment** — open `notebooks/multi_class_rag.ipynb` and run cell 1 first. It auto-detects the project root.
