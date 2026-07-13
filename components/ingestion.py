@@ -9,7 +9,7 @@ Responsibilities
 - Embed each chunk with BioLORD-2023 (via sentence-transformers).
 - Upsert embeddings into a persistent ChromaDB collection.
 - Expose the populated _embedding_model and _collection handles for
-  use by retrieval.py without re-loading.
+  use by dense_retriever.py without re-loading.
 
 Public API
 ----------
@@ -31,7 +31,7 @@ except ModuleNotFoundError:
     )
 
 # Module-level handles — populated by run_ingestion() or initialise_retrieval()
-# (imported and mutated by retrieval.py as needed)
+# (imported and mutated by dense_retriever.py as needed)
 _embedding_model = None
 _collection      = None
 

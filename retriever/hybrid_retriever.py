@@ -1,5 +1,5 @@
 from bm25_retriever import BM25Retriever
-from retrieval_retriever import RetrievalRetriever
+from dense_retriever import DenseRetriever
 from utils import load_chunks
 from components.config import CHUNKS_PATH
 from section_expander import build_sections_by_disorder, expansion_fetch_k, finish_search
@@ -36,7 +36,7 @@ class HybridRetriever:
 
         self.bm25 = BM25Retriever(chunks=chunks, json_path=json_path,
                                   sections=self.sections)
-        self.dense = RetrievalRetriever(sections=self.sections,
+        self.dense = DenseRetriever(sections=self.sections,
                                         json_path=json_path)
 
         # Single section map for fusion expansion — avoids duplicating the

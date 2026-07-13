@@ -12,8 +12,7 @@ AI-group-project-2026/
 ├── retriever/                  # Retrieval layer
 │   ├── utils.py                # Load chunks, tokenize for BM25
 │   ├── bm25_retriever.py       # Sparse keyword retrieval
-│   ├── retrieval.py            # ChromaDB dense retrieval API
-│   ├── retrieval_retriever.py  # Dense retriever + same-disorder expansion
+│   ├── dense_retriever.py      # Dense Chroma retrieval + DenseRetriever
 │   ├── hybrid_retriever.py     # BM25 + dense fusion (weighted RRF)
 │   └── section_expander.py     # Post-retrieval section completion
 ├── notebooks/
@@ -131,5 +130,5 @@ Edit paths in one place: `components/config.py`
 ## Notes
 - Default Top-K is 5, adjustable via the `k` parameter in `search()`.
 - Runs on CPU by default; uses GPU when available.
-- Retriever types: `bm25`, `hybrid`, `retrieval`.
+- Retriever types: `bm25`, `hybrid`, `dense`.
 - Hybrid fusion uses weighted Reciprocal Rank Fusion (RRF).
