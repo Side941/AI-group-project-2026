@@ -59,8 +59,11 @@ _SECTION_PATTERNS = [
     r"Developmental presentations",
     r"Culture-related features",
     r"Sex- and/or gender-related features",
-    r"Boundaries with other disorders and conditions",
+    # Full heading, unwrapped short form, and layout-wrapped "(differential" line.
     r"Boundaries with other disorders and conditions \(differential diagnosis\)",
+    r"Boundaries with other disorders and conditions \(differential",
+    r"Boundaries with other disorders and conditions",
+    r"General diagnostic requirements(?: for .+)?",
     r"Diagnostic requirements",
     r"Specifiers",
     r"Coded elsewhere",
@@ -72,20 +75,29 @@ SECTION_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+# Chapter 6 CDDR codes, plus cross-listed 8A (tics) and GA (e.g. PMDD) entries.
 DISORDER_CODE_RE = re.compile(
-    r"^(6[A-Z0-9]{2,5}(?:\.[A-Z0-9]{1,3})?)\s{2,}(.+)$",
+    r"^((?:6[A-Z0-9]{2,5}|8A\d{2}|GA\d{2})(?:\.[A-Z0-9]{1,3})?)\s{2,}(.+)$",
     re.MULTILINE,
+)
+
+# Continuation of a layout-wrapped differential-diagnosis heading.
+DIFF_HEADING_CONTINUATION_RE = re.compile(
+    r"^diagnosis\)(?:\s|$)",
+    re.IGNORECASE,
 )
 
 # Stop parsing when appendix / index material begins (not clinical CDDR entries).
 APPENDIX_STOP_RE = re.compile(
     r"(?:"
-    r"Mental or behavioural symptoms, signs or clinical findings include the following"
+    # Full phrase, or line-wrapped form ending at "include the"
+    r"Mental or behavioural symptoms, signs or clinical findings include the(?:\s+following)?"
+    r"|Mental or behavioural symptoms, signs or clinical findings\s+\d{2,3}\s*$"
     r"|Relationship problems and maltreatment as factors influencing health status"
     r"|^Acknowledgements?\b"
     r"|^Site directors?:"
     r"|^Other contributors?:"
-    r"|^MB\d{2}(?:\.\d+)?\s+Symptoms"
+    r"|^MB\d{2}(?:\.[A-Z0-9]+)?\s+Symptoms"
     r"|^QA\d{2}"
     r")",
     re.IGNORECASE,
@@ -94,7 +106,9 @@ APPENDIX_STOP_RE = re.compile(
 CHAPTER_INDEX_RE = re.compile(r"\bList of categories\b", re.IGNORECASE)
 ICD10_CROSSWALK_RE = re.compile(r"\bF\d{2}(?:\.\d+)?\b")
 MB_SYMPTOM_CODE_RE = re.compile(r"\bMB\d{2}(?:\.[A-Z0-9]+)?\b")
-INLINE_DISORDER_CODE_RE = re.compile(r"\b6[A-Z0-9]{2,5}(?:\.[A-Z0-9]{1,3})?\b")
+INLINE_DISORDER_CODE_RE = re.compile(
+    r"\b(?:6[A-Z0-9]{2,5}|8A\d{2}|GA\d{2})(?:\.[A-Z0-9]{1,3})?\b"
+)
 NON_CDDR_CODE_RE = re.compile(r"\b(?:QA|PJ|QE|MB|F)\d", re.IGNORECASE)
 PAGE_HEADER_BLEED_RE = re.compile(
     r"\b\d{2,3}\s+Clinical Descriptions and Diagnostic Requirements\b",
@@ -138,7 +152,15 @@ def get_domain(code: str) -> str:
 
 def normalise_section(heading: str) -> str:
     """Standardise a raw section heading string."""
-    return SECTION_NORMALISE_MAP.get(heading.strip().lower(), heading.strip())
+    key = heading.strip().lower()
+    if key in SECTION_NORMALISE_MAP:
+        return SECTION_NORMALISE_MAP[key]
+    # Prefix fallbacks for headings that vary by disorder name or wrap in layout.
+    if key.startswith("general diagnostic requirements"):
+        return "Diagnostic Requirements"
+    if key.startswith("boundaries with other disorders and conditions"):
+        return "Differential Diagnosis"
+    return heading.strip()
 
 
 def is_appendix_boundary(line: str) -> bool:
@@ -382,6 +404,10 @@ def chunk_text(full_text: str) -> list[dict]:
             current_domain        = get_domain(current_disorder_code)
             current_section       = "Overview"
             current_lines         = [current_disorder_name]
+            continue
+
+        # Skip second half of a layout-wrapped differential-diagnosis heading.
+        if DIFF_HEADING_CONTINUATION_RE.match(cleaned):
             continue
 
         sec_match = SECTION_RE.match(cleaned)
