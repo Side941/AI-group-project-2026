@@ -73,6 +73,8 @@ def run_ingestion(
     # ── Load embedding model ──────────────────────────────────────────────────
     print(f"\nLoading: {embedding_model_name} …")
     _embedding_model = SentenceTransformer(embedding_model_name, device=device)
+    _embedding_model.max_seq_length = 512   # default 128 — truncates chunks and queries
+    print(f"Max seq length: {_embedding_model.max_seq_length}")
     print(f"Loaded on  : {_embedding_model.device}")
     print(f"Output dims: {_embedding_model.get_sentence_embedding_dimension()}")
 
