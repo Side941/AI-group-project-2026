@@ -83,11 +83,11 @@ class HybridRetriever:
         scored.sort(key=lambda x: x["hybrid_score"], reverse=True)
         return scored
 
-    def search(self, query: str, k: int = 5) -> list[dict]:
+    def search(self, query: str, k: int = 5, *, expand: bool = True) -> list[dict]:
         if not query or not query.strip():
             return []
 
-        fetch_k = expansion_fetch_k(k, self.sections)
+        fetch_k = expansion_fetch_k(k, self.sections) if expand else k
         bm25_results = self.bm25.search(query, k=fetch_k, expand=False)
         dense_results = self.dense.search(query, k=fetch_k, expand=False)
 
@@ -98,4 +98,5 @@ class HybridRetriever:
             self.sections,
             self._sections_by_disorder,
             "hybrid_score",
+            expand=expand,
         )

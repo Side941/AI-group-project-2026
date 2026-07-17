@@ -207,7 +207,11 @@ def finish_search(
     their full section set, otherwise return scored rows as-is.
     """
     if not sections or not expand:
-        return scored[:k] if not sections else scored
+        # Always truncate to k. Previously, with sections set and expand=False,
+        # the full over-fetched candidate list (up to 4*k rows) was returned,
+        # so "flat" retrieval silently received 4x the requested context —
+        # invalidating any flat vs seed-and-expand comparison.
+        return scored[:k]
 
     top_keys = top_k_disorder_keys(scored, k)
     return expand_sections(
