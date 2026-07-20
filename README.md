@@ -1,133 +1,127 @@
-# AI Group Project 2026 — RAG Pipeline for Mental Health Risk Detection
+# AI Group Project 2026 — Depression / Suicide-Risk RAG Pipeline
 
-## Project Structure
+Prompted RAG classifiers over ICD-11 clinical criteria (Qwen via Ollama). Two evaluation heads share the same retrieval stack:
+
+| Head | Labels | Eval set | Notebook |
+|------|--------|----------|----------|
+| Multiclass | `suicidal` / `depression` / `normal` | 450 (150/class) | `notebooks/multi_class_rag.ipynb` |
+| Binary | `suicide` / `non-suicide` | 300 (150/class) | `notebooks/binary_suicide_rag.ipynb` |
+
+Each head also has a small **dev** slice (10/class) carved from its final set for prompt / top-k tuning.
+
+## Project structure
 
 ```
 AI-group-project-2026/
-├── components/                 # Knowledge-base build pipeline
-│   ├── config.py               # Shared config + repo-root path resolution
-│   ├── chunker.py              # Step 1: ICD-11 PDF → JSON chunks
-│   ├── ingestion.py            # Step 2: JSON chunks → ChromaDB vectors
-│   └── main.py                 # Run chunking + ingestion in one command
-├── retriever/                  # Retrieval layer
-│   ├── utils.py                # Load chunks, tokenize for BM25
-│   ├── bm25_retriever.py       # Sparse keyword retrieval
-│   ├── dense_retriever.py      # Dense Chroma retrieval + DenseRetriever
-│   ├── hybrid_retriever.py     # BM25 + dense fusion (weighted RRF)
-│   └── section_expander.py     # Post-retrieval section completion
+├── src/
+│   ├── components/          # KB build: config, chunker, ingestion
+│   └── retriever/           # BM25, dense, hybrid (+ section expander)
+├── experiments/             # CLI runners
+│   ├── run_kb_pipeline.py
+│   ├── build_rag_eval_subset.py
+│   └── build_binary_suicide_subset.py
 ├── notebooks/
-│   ├── 01_kb_pipeline_demo.ipynb   # Documented KB pipeline (chunk + ingest + inspect)
-│   ├── 02_dataset_prep_demo.ipynb  # Documented eval/dev dataset builder + inspect
-│   └── multi_class_rag.ipynb       # Full RAG classification experiment
-├── knowledge_base/
-│   ├── icd_11.pdf              # Source ICD-11 PDF (typically not committed)
-│   ├── icd11_chunks.json       # Extracted clinical chunks
-│   └── chroma_db/              # Vector store (gitignored)
-├── datasets/
-│   ├── build_rag_eval_subset.py   # Reproducible eval + dev-slice builder
-│   ├── rag_eval_subset.csv        # Final reporting set (450 rows)
-│   ├── rag_eval_subset.meta.json  # Provenance + SHA256 of the final set
-│   ├── rag_dev_slice.csv          # Prompt/k tuning slice (30 rows)
-│   ├── rag_dev_slice.meta.json    # Provenance + parent row_ids
-│   ├── mental_heath_unbanlanced.csv          # Optional local HF cache (gitignored)
-│   └── mental_health_combined_test.csv       # Optional local HF cache (gitignored)
+│   ├── 01_kb_pipeline_demo.ipynb
+│   ├── 02_dataset_prep_demo.ipynb
+│   ├── multi_class_rag.ipynb
+│   └── binary_suicide_rag.ipynb
+├── datasets/                # CSVs only (source + eval/dev subsets)
+├── results/                 # Meta JSON + experiment outputs
+├── knowledge_base/          # ICD-11 PDF, chunks JSON, chroma_db/
+├── rag_system_blueprint.html
 ├── requirements.txt
 └── README.md
 ```
 
-All paths are resolved from the **repo root** via `components/config.py`, so code works whether you run from the project root, `retriever/`, or `notebooks/`.
+All paths resolve from the **repo root** via `src/components/config.py`. Experiment scripts and notebooks put `src/` (and `src/retriever/`) on `sys.path`.
 
 ## Setup
 
-**1. Clone the repo**
 ```bash
 git clone https://github.com/Side941/AI-group-project-2026.git
 cd AI-group-project-2026
-```
-
-**2. Install dependencies**
-```bash
 pip install -r requirements.txt
 ```
 
-**3. Place required data files**
-- `knowledge_base/icd_11.pdf`
-- `knowledge_base/icd11_chunks.json` (from chunker, or provided)
-- `knowledge_base/chroma_db/` (from ingestion, or provided)
-- `datasets/rag_eval_subset.csv` (committed final set; regenerate below if needed)
-- `datasets/rag_dev_slice.csv` (committed 30-post tuning slice)
+**Also needed locally (not all committed):**
 
-## RAG evaluation sets
+| Path | Role |
+|------|------|
+| `knowledge_base/icd_11.pdf` | Source PDF for chunking |
+| `knowledge_base/icd11_chunks.json` | Chunked ICD-11 criteria |
+| `knowledge_base/chroma_db/` | Dense vector store (gitignored) |
+| Ollama + `qwen3:0.6b` / `qwen3:1.7b` | LLM inference for notebooks |
 
-Two committed stratified artifacts (anxiety excluded):
+Committed eval/dev CSVs under `datasets/` and their provenance under `results/` are enough to run classification notebooks once the KB + Ollama are available.
+
+## Evaluation sets
+
+### Multiclass (mental-health corpus)
 
 | File | Size | Purpose |
 |------|------|---------|
-| `rag_dev_slice.csv` | 30 (10/class) | Prompt / top-k / alpha tuning (`eval_mode="dev"`) |
-| `rag_eval_subset.csv` | 450 (150/class) | Final reported results (`eval_mode="final"`) |
+| `datasets/rag_dev_slice.csv` | 30 (10/class) | Tuning (`eval_mode="dev"`) |
+| `datasets/rag_eval_subset.csv` | 450 (150/class) | Reporting (`eval_mode="final"`) |
 
-The dev slice is carved from the final set (see `parent_row_id`), so tuning posts are a transparent subset of the reporting set. Labels: `suicidal` | `depression` | `normal`.
-
-In the notebook, switch modes via `CFG["eval_mode"]` (`"dev"` or `"final"`). Default is `"dev"`. Do not keep editing prompts after switching to `"final"`.
-
-Regenerate both (deterministic; final seed `42`, dev seed `43`):
+Anxiety excluded. Seeds: eval `42`, dev `43`. Meta: `results/rag_*.meta.json`.
 
 ```bash
-python datasets/build_rag_eval_subset.py
+python experiments/build_rag_eval_subset.py
 ```
 
-Load order for the builder:
-1. Local CSVs `datasets/mental_heath_unbanlanced.csv` + `datasets/mental_health_combined_test.csv` if both exist
-2. Otherwise download from Hugging Face (`ourafla/Mental-Health_Text-Classification_Dataset`) and cache those CSVs locally
+Builder prefers local HF caches (`mental_heath_unbanlanced.csv`, `mental_health_combined_test.csv`); otherwise downloads from Hugging Face (`ourafla/Mental-Health_Text-Classification_Dataset`) and caches them.
 
-Raw HF dumps stay gitignored; the eval/dev CSVs and their `.meta.json` files are tracked so teammates can run without re-downloading.
+### Binary suicide (`Suicide_Detection.csv`)
+
+| File | Size | Purpose |
+|------|------|---------|
+| `datasets/binary_suicide_dev.csv` | 20 (10/class) | Tuning |
+| `datasets/binary_suicide_eval.csv` | 300 (150/class) | Reporting |
+
+Labels kept as in source: `suicide` / `non-suicide`. Meta: `results/binary_suicide_*.meta.json`.
+
+```bash
+python experiments/build_binary_suicide_subset.py
+```
+
+Requires `datasets/Suicide_Detection.csv` (large source; typically gitignored).
+
+In either notebook, switch modes with `CFG["eval_mode"]` (`"dev"` or `"final"`). Default is `"dev"`. Lock prompts before switching to `"final"`.
 
 ## Running
 
-**Knowledge-base pipeline** (from project root):
+**Knowledge-base pipeline** (from repo root):
+
 ```bash
-python -m components.main
-
-# Optional: ingestion only (reuse existing chunks)
-python -m components.main --skip-chunking
-
-# Optional: force re-ingestion into Chroma
-python -m components.main --rebuild
-
-# Existing step-by-step commands
-python -m components.chunker
-python -m components.ingestion
+python experiments/run_kb_pipeline.py
+python experiments/run_kb_pipeline.py --skip-chunking   # ingest only
+python experiments/run_kb_pipeline.py --rebuild         # recreate Chroma collection
 ```
 
-**Dataset rebuild** (eval + dev slices):
-```bash
-python datasets/build_rag_eval_subset.py
-```
+Documented walkthrough: `notebooks/01_kb_pipeline_demo.ipynb`.
 
-**Notebook experiment** — open `notebooks/multi_class_rag.ipynb` and run cell 1 first. It auto-detects the project root.
+**Classification experiments** — open the notebook and run the path-setup cell first (auto-detects repo root):
 
-**Demo notebooks** (documented pipelines with explanations + inspection; CLIs remain for automation):
-- `notebooks/01_kb_pipeline_demo.ipynb` — KB orchestration (chunk → ingest) as in `components/main.py`
-- `notebooks/02_dataset_prep_demo.ipynb` — full eval/dev dataset builder stages as in `datasets/build_rag_eval_subset.py`
+- Multiclass → `notebooks/multi_class_rag.ipynb`
+- Binary → `notebooks/binary_suicide_rag.ipynb`
 
-Rebuild flags default to off / write-on where noted; read the markdown cells before flipping them.
+Outputs land under `results/` (`rag_results_*.csv`, `binary_rag_results_*.csv`, error analyses).
+
+**Dataset prep walkthrough:** `notebooks/02_dataset_prep_demo.ipynb` (multiclass builder stages).
 
 ## Path configuration
 
-Edit paths in one place: `components/config.py`
+Edit once in `src/components/config.py`:
 
 | Constant | Points to |
 |----------|-----------|
-| `PROJECT_ROOT` | Repo root (auto-detected) |
-| `PDF_PATH` | `knowledge_base/icd_11.pdf` |
-| `CHUNKS_PATH` | `knowledge_base/icd11_chunks.json` |
-| `CHROMA_PATH` | `knowledge_base/chroma_db` |
-| `RAG_EVAL_SUBSET_PATH` / `DATASET_PATH` | `datasets/rag_eval_subset.csv` (final) |
-| `RAG_DEV_SLICE_PATH` | `datasets/rag_dev_slice.csv` (tuning) |
-| `DATASET_TRAIN_PATH` / `DATASET_TEST_PATH` | Local HF mental-health CSV caches |
+| `PROJECT_ROOT` | Repo root (auto) |
+| `PDF_PATH` / `CHUNKS_PATH` / `CHROMA_PATH` | `knowledge_base/` |
+| `RAG_*` / `BINARY_*` | Eval/dev CSVs, meta, result paths |
+| `RETRIEVAL_SECTIONS` / `MOOD_DISORDER_PREFIXES` | Retrieval filters over ICD-11 |
 
 ## Notes
-- Default Top-K is 5, adjustable via the `k` parameter in `search()`.
-- Runs on CPU by default; uses GPU when available.
-- Retriever types: `bm25`, `hybrid`, `dense`.
-- Hybrid fusion uses weighted Reciprocal Rank Fusion (RRF).
+
+- Retrievers: `bm25`, `dense`, `hybrid` (weighted RRF). Default top-k in experiments is configurable in the notebook `CFG`.
+- Both heads currently retrieve over the **ICD-11** store (mood-filtered). Suicide-specific KB and few-shot vector store are planned (see `rag_system_blueprint.html`), not required to run today’s notebooks.
+- CPU by default; GPU used when available for embeddings.
