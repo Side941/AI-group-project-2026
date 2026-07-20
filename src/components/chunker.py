@@ -24,7 +24,7 @@ import subprocess
 from pathlib import Path
 
 try:
-    from config import (        # when run directly: python components/chunker.py
+    from config import (        # when run directly: python src/components/chunker.py
         CHUNK_COUNT_WARNING_THRESHOLD,
         CONTENT_END_PAGE,
         CONTENT_START_PAGE,
@@ -34,7 +34,7 @@ try:
         SECTION_NORMALISE_MAP,
     )
 except ModuleNotFoundError:
-    from components.config import (   # when imported as a package
+    from components.config import (   # when imported as a package (src on sys.path)
         CHUNK_COUNT_WARNING_THRESHOLD,
         CONTENT_END_PAGE,
         CONTENT_START_PAGE,

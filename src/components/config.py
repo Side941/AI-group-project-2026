@@ -4,15 +4,15 @@ config.py
 Shared configuration and project paths for the ICD-11 knowledge base pipeline.
 
 All filesystem paths are resolved relative to PROJECT_ROOT (the repo root),
-so imports work whether you run from the project root, retriever/, or notebooks/.
+so imports work whether you run from the project root, src/, or notebooks/.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-# Repo root: parent of the components/ package directory.
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Repo root: src/components/config.py -> parents[0]=components, [1]=src, [2]=repo.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def project_path(*parts: str) -> Path:
@@ -44,9 +44,9 @@ HF_TEST_FILE = "mental_health_combined_test.csv"
 DATASET_TRAIN_PATH = project_path("datasets", HF_TRAIN_FILE)
 DATASET_TEST_PATH = project_path("datasets", HF_TEST_FILE)
 
-# Stratified RAG evaluation subset (committed; regenerate via datasets/build_rag_eval_subset.py).
+# Stratified RAG evaluation subset (committed; regenerate via experiments/build_rag_eval_subset.py).
 RAG_EVAL_SUBSET_PATH = project_path("datasets", "rag_eval_subset.csv")
-RAG_EVAL_META_PATH = project_path("datasets", "rag_eval_subset.meta.json")
+RAG_EVAL_META_PATH = project_path("results", "rag_eval_subset.meta.json")
 RAG_EVAL_LABELS: tuple[str, ...] = ("suicidal", "depression", "normal")
 RAG_EVAL_EXCLUDE: tuple[str, ...] = ("anxiety",)
 RAG_EVAL_PER_CLASS = 150
@@ -57,12 +57,18 @@ RAG_EVAL_MAX_CHARS = 2000
 # Stratified development slice for prompt/k tuning (subset of the final eval set).
 # Use eval_mode="dev" in the notebook while iterating; switch to "final" for reporting.
 RAG_DEV_SLICE_PATH = project_path("datasets", "rag_dev_slice.csv")
-RAG_DEV_META_PATH = project_path("datasets", "rag_dev_slice.meta.json")
+RAG_DEV_META_PATH = project_path("results", "rag_dev_slice.meta.json")
 RAG_DEV_PER_CLASS = 10
 RAG_DEV_SEED = 43
 
 # Default notebook dataset path points at the final eval set.
 DATASET_PATH = RAG_EVAL_SUBSET_PATH
+
+# Experiment run outputs (RAG predictions, summaries, error analysis).
+RESULTS_DIR = project_path("results")
+RAG_RESULTS_FINAL_PATH = RESULTS_DIR / "rag_results_final.csv"
+RAG_RESULTS_SUMMARY_PATH = RESULTS_DIR / "rag_results_summary.csv"
+RAG_ERROR_ANALYSIS_PATH = RESULTS_DIR / "error_analysis_best_config.csv"
 
 # ── Model / collection ─────────────────────────────────────────────────────────
 COLLECTION_NAME = "icd11_clinical"

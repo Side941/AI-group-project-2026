@@ -10,7 +10,7 @@ Documented walkthrough (full stage logic + inspection + explanations):
     notebooks/02_dataset_prep_demo.ipynb
 
 Prefer that notebook for thesis-facing explanation. This file remains the
-automation entrypoint (`python datasets/build_rag_eval_subset.py`).
+automation entrypoint (`python experiments/build_rag_eval_subset.py`).
 
 Prefer local CSVs under datasets/; fall back to the Hugging Face Hub.
 Re-running with the same inputs and seeds must produce identical CSVs.
@@ -26,10 +26,13 @@ from pathlib import Path
 
 import pandas as pd
 
-# Allow `python datasets/build_rag_eval_subset.py` from the repo root.
+# Allow `python experiments/build_rag_eval_subset.py` from the repo root.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SRC = _PROJECT_ROOT / "src"
+for _path in (_SRC, _SRC / "retriever"):
+    _s = str(_path)
+    if _s not in sys.path:
+        sys.path.insert(0, _s)
 
 from components.config import (
     DATASET_TEST_PATH,

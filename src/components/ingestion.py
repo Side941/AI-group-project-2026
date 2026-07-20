@@ -22,11 +22,11 @@ from __future__ import annotations
 import json
 
 try:
-    from config import (        # when run directly: python components/ingestion.py
+    from config import (        # when run directly: python src/components/ingestion.py
         BATCH_SIZE, CHUNKS_PATH, CHROMA_PATH, COLLECTION_NAME, EMBEDDING_MODEL,
     )
 except ModuleNotFoundError:
-    from components.config import (   # when imported as a package
+    from components.config import (   # when imported as a package (src on sys.path)
         BATCH_SIZE, CHUNKS_PATH, CHROMA_PATH, COLLECTION_NAME, EMBEDDING_MODEL,
     )
 
