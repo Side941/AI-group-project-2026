@@ -12,6 +12,12 @@ notebooks/knowledge_base/chroma_db/
 !datasets/rag_eval_subset.meta.json
 !datasets/rag_dev_slice.csv
 !datasets/rag_dev_slice.meta.json
+!datasets/binary_suicide_eval.csv
+!datasets/binary_suicide_dev.csv
+!results/binary_suicide_eval.meta.json
+!results/binary_suicide_dev.meta.json
+!results/rag_eval_subset.meta.json
+!results/rag_dev_slice.meta.json
 /anaconda_projects
 /.virtual_documents
 /components/.ipynb_checkpoints

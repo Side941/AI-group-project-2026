@@ -64,11 +64,30 @@ RAG_DEV_SEED = 43
 # Default notebook dataset path points at the final eval set.
 DATASET_PATH = RAG_EVAL_SUBSET_PATH
 
+# ── Binary suicide classification (Suicide_Detection.csv) ─────────────────────
+# Labels kept as in the source CSV: suicide / non-suicide.
+BINARY_SOURCE_PATH = project_path("datasets", "Suicide_Detection.csv")
+BINARY_EVAL_SUBSET_PATH = project_path("datasets", "binary_suicide_eval.csv")
+BINARY_EVAL_META_PATH = project_path("results", "binary_suicide_eval.meta.json")
+BINARY_DEV_SLICE_PATH = project_path("datasets", "binary_suicide_dev.csv")
+BINARY_DEV_META_PATH = project_path("results", "binary_suicide_dev.meta.json")
+BINARY_LABELS: tuple[str, ...] = ("suicide", "non-suicide")
+BINARY_EVAL_PER_CLASS = 150
+BINARY_EVAL_SEED = 42
+BINARY_DEV_PER_CLASS = 10
+BINARY_DEV_SEED = 43
+BINARY_MIN_CHARS = 40
+BINARY_MAX_CHARS = 2000
+BINARY_DATASET_PATH = BINARY_EVAL_SUBSET_PATH
+
 # Experiment run outputs (RAG predictions, summaries, error analysis).
 RESULTS_DIR = project_path("results")
 RAG_RESULTS_FINAL_PATH = RESULTS_DIR / "rag_results_final.csv"
 RAG_RESULTS_SUMMARY_PATH = RESULTS_DIR / "rag_results_summary.csv"
 RAG_ERROR_ANALYSIS_PATH = RESULTS_DIR / "error_analysis_best_config.csv"
+BINARY_RESULTS_FINAL_PATH = RESULTS_DIR / "binary_rag_results_final.csv"
+BINARY_RESULTS_SUMMARY_PATH = RESULTS_DIR / "binary_rag_results_summary.csv"
+BINARY_ERROR_ANALYSIS_PATH = RESULTS_DIR / "binary_error_analysis_best_config.csv"
 
 # ── Model / collection ─────────────────────────────────────────────────────────
 COLLECTION_NAME = "icd11_clinical"
