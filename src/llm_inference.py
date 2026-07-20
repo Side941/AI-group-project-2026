@@ -23,7 +23,8 @@ class LLMInference:
         self.thinking_mode = thinking_mode
         self.base_url = base_url
         self.timeout = timeout
-        self.last_thinking_trace: str | None = None  # populated after each classify() call
+        self.last_thinking_trace: str | None = None
+        self.last_response: str | None = None
 
     def load(self) -> None:
         """Check that the model is available in Ollama."""
@@ -44,8 +45,7 @@ class LLMInference:
     def classify(self, prompt: str, max_tokens: int = 2000) -> str:
         """
         Run inference using Ollama generate API.
-        `think` explicitly toggles Qwen3's reasoning mode — without this,
-        thinking_mode has no effect on the actual API call.
+        `think` explicitly toggles Qwen3's reasoning mode.
         """
         payload = {
             "model": self.model_name,
@@ -68,27 +68,28 @@ class LLMInference:
         except requests.exceptions.Timeout:
             raise RuntimeError(
                 f"Ollama request timed out after {self.timeout}s "
-                f"(model={self.model_name}, thinking={self.thinking_mode}). "
-                f"Larger models / thinking mode may need a higher timeout."
+                f"(model={self.model_name}, thinking={self.thinking_mode})."
             )
 
         if response.status_code != 200:
             raise RuntimeError(f"Ollama API error: {response.text}")
 
         result = response.json()
-        # DEBUG: Check token usage
+        
+        # Store both response and thinking trace
+        self.last_response = result.get("response", "").strip()
+        self.last_thinking_trace = result.get("thinking")
+        
+        # Print thinking trace if available
+        if self.thinking_mode and self.last_thinking_trace:
+            print(f"\n🧠 Thinking Trace:\n{self.last_thinking_trace}\n")
+        
+        # Print token usage
         print(f"\n🔢 Tokens: prompt_eval={result.get('prompt_eval_count')}, "
               f"eval={result.get('eval_count')}, "
               f"done_reason={result.get('done_reason')}")
 
-        # When think=True, Ollama returns the reasoning trace in a separate
-        # "thinking" field rather than mixing it into "response". Stash it
-        # so callers can sanity-check that thinking mode is actually firing.
-        self.last_thinking_trace = result.get("thinking")
-
         content = result.get("response", "").strip()
-
-        # Clean up: remove quotes, slashes, newlines
         content = content.strip('"\'/ \n')
 
         return content

@@ -1,56 +1,33 @@
 """
 evaluate.py
 ===========
-Runs a single experiment configuration for suicide detection.
+Runs experiments using KB retrieval with optional Reddit examples.
+Supports: KB only, Reddit examples only, or Combined (KB + Reddit).
 """
 
 from __future__ import annotations
 
 from typing import List, Tuple
 import json
-
 import pandas as pd
 from tqdm import tqdm
 
 from src.config import (
-    ExperimentConfig,
-    RetrieverType,
     get_labels,
     TEXT_COL,
     LABEL_COL,
-    CHROMA_PATH,
-    KB_CHROMA_PATH,
-    KB_COLLECTION_NAME,
     MHGAP_SUICIDE_PATH,
+    CHROMA_PATH,
 )
 from src.embedder import Embedder
-from src.retrievers.base import BaseRetriever
-from src.retrievers.bm25_retriever import BM25Retriever
 from src.retrievers.dense_retriever import DenseRetriever
+from src.retrievers.bm25_retriever import BM25Retriever
 from src.retrievers.hybrid_retriever import HybridRetriever
 from src.prompt_builder import PromptBuilder
 from src.llm_inference import LLMInference
 from src.vector_store import VectorStore
 
 MAX_RETRIES = 2
-
-
-def get_retriever(
-    retriever_type: RetrieverType,
-    corpus_texts: List[str],
-    corpus_labels: List[str],
-    embedder: Embedder,
-    k: int = 3,
-) -> BaseRetriever:
-    """Factory: create the right retriever based on config."""
-    if retriever_type == "bm25":
-        return BM25Retriever(corpus_texts, corpus_labels)
-    elif retriever_type == "dense":
-        return DenseRetriever(corpus_texts, corpus_labels, embedder)
-    elif retriever_type == "hybrid":
-        raise ValueError("HybridRetriever must be constructed manually.")
-    else:
-        raise ValueError(f"Unknown retriever type: {retriever_type}")
 
 
 def parse_prediction(raw_output: str, valid_labels: List[str]) -> str | None:
@@ -96,115 +73,88 @@ def compute_metrics(y_true: List[str], y_pred: List[str | None]) -> dict:
     }
 
 
-def _load_knowledge_base(embedder: Embedder) -> VectorStore:
-    """Load the mhGAP knowledge base."""
-    vector_store = VectorStore(KB_CHROMA_PATH, KB_COLLECTION_NAME)
+def load_kb_chunks() -> Tuple[List[str], List[str]]:
+    """Load mhGAP chunks for KB retrieval."""
+    with open(MHGAP_SUICIDE_PATH, 'r') as f:
+        data = json.load(f)
+    
+    if isinstance(data, dict):
+        data = [data]
+    
+    texts = []
+    labels = []
+    for chunk in data:
+        if 'text' in chunk:
+            texts.append(chunk['text'])
+            labels.append(chunk.get('section', ''))
+        else:
+            texts.append(str(chunk))
+            labels.append('')
+    
+    return texts, labels
+
+
+def load_training_examples(train_df: pd.DataFrame, embedder: Embedder) -> Tuple[DenseRetriever, VectorStore]:
+    """Load or build training example retriever."""
+    vector_store = VectorStore(CHROMA_PATH, "train_suicide")
     vector_store.create_or_load(384)
     
-    if vector_store.count() == 0:
-        print(f"Indexing knowledge base from {MHGAP_SUICIDE_PATH} ...")
-        with open(MHGAP_SUICIDE_PATH, "r", encoding="utf-8") as f:
-            chunks = json.load(f)
-        
-        if isinstance(chunks, dict):
-            chunks = [chunks]
-        
-        texts = []
-        ids = []
-        labels = []
-        metadatas = []
-        
-        for i, chunk in enumerate(chunks):
-            if 'text' in chunk:
-                texts.append(chunk['text'])
-                section = chunk.get('section', '')
-                labels.append(section)
-                metadatas.append({
-                    'source': chunk.get('source', 'mhgap'),
-                    'section': section,
-                    'index': i,
-                })
-            else:
-                texts.append(str(chunk))
-                labels.append('')
-                metadatas.append({'source': 'unknown', 'section': '', 'index': i})
-            
-            ids.append(f"kb_suicide_{i:04d}")
-        
-        embeddings = embedder.encode(texts)
-        vector_store.add_with_metadata(ids, texts, embeddings, metadatas, labels)
-        print(f"Indexed {vector_store.count()} knowledge chunks")
-    else:
-        print(f"Using cached knowledge base: {vector_store.count()} chunks")
+    example_texts = train_df[TEXT_COL].tolist()
+    example_labels = train_df[LABEL_COL].tolist()
     
-    return vector_store
+    if vector_store.count() == 0:
+        print("Indexing training examples into ChromaDB...")
+        embeddings = embedder.encode(example_texts)
+        ids = [f"ex_{i:06d}" for i in range(len(example_texts))]
+        vector_store.add(ids, example_texts, embeddings, example_labels)
+        print(f"Indexed {vector_store.count():,} training examples")
+    else:
+        print(f"Using cached training examples: {vector_store.count():,} examples")
+    
+    example_retriever = DenseRetriever(example_texts, example_labels, embedder)
+    example_retriever.index()
+    
+    return example_retriever, vector_store
 
 
 def run_experiment(
-    config: ExperimentConfig,
+    config,
     train_df: pd.DataFrame,
     test_df: pd.DataFrame,
     embedder: Embedder | None = None,
     debug: bool = False,
 ) -> pd.DataFrame:
     """Run a single experiment configuration."""
-
+    
     # ── Setup ────────────────────────────────────────────────────────────
-    corpus_texts = train_df[TEXT_COL].tolist()
-    corpus_labels = train_df[LABEL_COL].tolist()
     valid_labels = get_labels()
+    
+    if embedder is None:
+        embedder = Embedder()
 
-    # ── Retrieval setup ──────────────────────────────────────────────────
-    use_chroma = False
-    use_kb = False
-    vector_store = None
-    retriever = None
+    # ── Load KB chunks ──────────────────────────────────────────────────
+    kb_texts, kb_labels = load_kb_chunks()
+    print(f"Loaded {len(kb_texts)} KB chunks")
 
-    if config.prompt_type == "few-shot":
-        use_kb = getattr(config.retriever, 'use_knowledge_base', False)
-        use_chroma = config.retriever.type in ("dense", "hybrid")
+    # ── KB Retriever setup ──────────────────────────────────────────────
+    kb_retriever = None
+    
+    if config.retriever_type == "dense":
+        kb_retriever = DenseRetriever(kb_texts, kb_labels, embedder)
+    elif config.retriever_type == "bm25":
+        kb_retriever = BM25Retriever(kb_texts, kb_labels)
+    elif config.retriever_type == "hybrid":
+        kb_retriever = HybridRetriever(kb_texts, kb_labels, embedder, alpha=0.5)
+    else:
+        raise ValueError(f"Unknown retriever: {config.retriever_type}")
+    
+    kb_retriever.index()
 
-        if use_kb:
-            if embedder is None:
-                embedder = Embedder()
-            vector_store = _load_knowledge_base(embedder)
-            use_chroma = True
-        
-        elif use_chroma:
-            if embedder is None:
-                embedder = Embedder()
-
-            vector_store = VectorStore(CHROMA_PATH, "train_suicide")
-            vector_store.create_or_load(384)
-
-            if vector_store.count() == 0:
-                print("Indexing corpus into ChromaDB...")
-                embeddings = embedder.encode(corpus_texts)
-                ids = [f"ex_{i:06d}" for i in range(len(corpus_texts))]
-                vector_store.add(ids, corpus_texts, embeddings, corpus_labels)
-                print(f"Indexed {vector_store.count():,} examples")
-            else:
-                print(f"Using cached ChromaDB: {vector_store.count():,} examples")
-
-            if config.retriever.type == "hybrid":
-                dense_weight = getattr(config.retriever, "dense_weight", 0.5)
-                retriever = HybridRetriever(
-                    corpus_texts, corpus_labels,
-                    vector_store=vector_store,
-                    embedder=embedder,
-                    alpha=1 - dense_weight,
-                )
-                retriever.index()
-                print(f"HYBRID retriever ready (alpha={1 - dense_weight:.1f})")
-                use_chroma = False
-        else:
-            if embedder is None:
-                embedder = Embedder()
-            retriever = get_retriever(
-                config.retriever.type, corpus_texts, corpus_labels, embedder, config.retriever.k
-            )
-            retriever.index()
-            print(f"BM25 retriever indexed: {len(corpus_texts):,} examples")
+    # ── Load training examples (if combined mode) ──────────────────────
+    example_retriever = None
+    if config.use_examples and train_df is not None:
+        example_retriever, _ = load_training_examples(train_df, embedder)
+        print(f"Loaded training examples for combined mode")
 
     # ── Prompt builder ───────────────────────────────────────────────────
     prompt_builder = PromptBuilder()
@@ -216,25 +166,38 @@ def run_experiment(
     # ── Run predictions ──────────────────────────────────────────────────
     results = []
     null_retries_saved = 0
-    retriever_type = getattr(config.retriever, 'type', 'none')
-    loop_desc = f"{config.model_size} | {config.prompt_type} | {retriever_type}"
+    mode = "Combined" if config.use_examples else "KB only"
+    loop_desc = f"{config.model_size} | {config.prompt_type} | {config.retriever_type} | k={config.k} | {mode}"
 
     for i, (_, row) in enumerate(tqdm(test_df.iterrows(), total=len(test_df), desc=loop_desc)):
         text = row[TEXT_COL]
         true_label = row[LABEL_COL]
 
-        examples = None
-        if config.prompt_type == "few-shot":
-            if use_chroma:
-                query_embedding = embedder.encode_single(text)
-                examples = vector_store.query(query_embedding, k=config.retriever.k)
-            else:
-                query_embedding = embedder.encode_single(text)
-                examples = retriever.retrieve(text, query_embedding, k=config.retriever.k)
-            
-            prompt = prompt_builder.build(text, examples, is_knowledge_base=use_kb)
-        else:
+        if config.prompt_type == "zero-shot":
             prompt = prompt_builder.build_zero_shot(text)
+            kb_chunks = None
+            reddit_examples = None
+            
+        else:
+            # Retrieve KB chunks
+            query_embedding = embedder.encode_single(text)
+            kb_chunks = kb_retriever.retrieve(text, query_embedding, k=config.k)
+            
+            # Retrieve Reddit examples (if combined mode)
+            reddit_examples = None
+            if config.use_examples and example_retriever is not None:
+                reddit_examples = example_retriever.retrieve(text, query_embedding, k=config.k)
+            
+            # Build prompt based on what's available
+            if kb_chunks and reddit_examples:
+                # Combined: KB + Reddit examples
+                prompt = prompt_builder.build_combined(text, kb_chunks, reddit_examples)
+            elif kb_chunks:
+                # KB only
+                prompt = prompt_builder.build_knowledge_based(text, kb_chunks)
+            else:
+                # Fallback
+                prompt = prompt_builder.build_zero_shot(text)
 
         raw_output = ""
         attempt = 0
@@ -248,15 +211,43 @@ def run_experiment(
 
         pred_label = parse_prediction(raw_output, valid_labels)
 
-        if debug and i < 3:
-            print(f"\n{'='*60}")
-            print(f"DEBUG Example {i+1}")
-            print(f"True: {true_label} | Pred: {pred_label} | Raw: '{raw_output[:80]}'")
+        # ── Detailed Debug Output ──────────────────────────────────────
+        if debug:
+            print(f"\n{'='*80}")
+            print(f"🔍 DEBUG Example {i+1}")
+            print(f"{'='*80}")
+            print(f"📝 Text: {text[:200]}...")
+            print(f"🏷️  True Label: {true_label}")
+            print(f"🤖 Predicted: {pred_label}")
+            print(f"📄 Raw Output: '{raw_output}'")
+            
+            # Show model thinking trace if available
+            if hasattr(llm, 'last_thinking_trace') and llm.last_thinking_trace:
+                print(f"\n🧠 Model Thinking/Reasoning:")
+                trace = llm.last_thinking_trace
+                if len(trace) > 500:
+                    print(f"{trace[:500]}...")
+                else:
+                    print(trace)
+            
             if config.prompt_type == "few-shot":
-                print(f"Retrieved: {[(t[:60], l) for t, l in examples]}")
-            print(f"{'='*60}")
+                print(f"\n📚 Retrieved KB Chunks ({len(kb_chunks) if kb_chunks else 0}):")
+                if kb_chunks:
+                    for j, (chunk_text, section) in enumerate(kb_chunks, 1):
+                        print(f"  [{j}] Section: {section}")
+                        print(f"      Text: {chunk_text[:150]}...")
+                
+                if reddit_examples:
+                    print(f"\n📊 Retrieved Reddit Examples ({len(reddit_examples)}):")
+                    for j, (ex_text, ex_label) in enumerate(reddit_examples, 1):
+                        print(f"  [{j}] Label: {ex_label}")
+                        print(f"      Text: {ex_text[:150]}...")
+            
+            print(f"\n📋 Full Prompt:")
+            print(f"{prompt}")
+            print(f"{'='*80}\n")
 
-        retrieved_str = "|||".join(ex_text for ex_text, _ in examples) if examples else ""
+        retrieved_str = "|||".join(ex_text for ex_text, _ in (kb_chunks or [])) if kb_chunks else ""
 
         results.append({
             "text": text,

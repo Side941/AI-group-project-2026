@@ -1,8 +1,7 @@
 """
 config.py
 =========
-Shared configuration for the Example-Based RAG pipeline.
-Handles all paths, model settings, experiment grid, and retriever configs.
+Shared configuration for the KB-only RAG pipeline.
 """
 
 from __future__ import annotations
@@ -19,25 +18,19 @@ def project_path(*parts: str) -> Path:
 
 
 # ── Paths ───────────────────────────────────────────────────────────────────────
-SUICIDE_RAW_DATA_PATH   = project_path("datasets", "Suicide_Detection.csv")
-SUICIDE_TRAIN_PATH      = project_path("datasets", "suicide_train.csv")
-SUICIDE_TEST_PATH       = project_path("datasets", "suicide_test.csv")
+SUICIDE_TRAIN_PATH = project_path("datasets", "suicide_train.csv")
+SUICIDE_TEST_PATH = project_path("datasets", "suicide_test.csv")
 
-CHROMA_PATH     = project_path("datasets", "chroma_db")
-
-# Knowledge Base ChromaDB
+# Knowledge Base
+MHGAP_SUICIDE_PATH = project_path("knowledge_based", "mhgap.json")
 KB_CHROMA_PATH = project_path("knowledge_based", "kb_chromadb")
 
-# Knowledge Base files
-MHGAP_SUICIDE_PATH    = project_path("knowledge_based", "mhgap.json")
+CHROMA_PATH = project_path("datasets", "chroma_db")  # For training examples
 
-RESULTS_DIR     = project_path("results")
-SUMMARY_PATH    = RESULTS_DIR / "summary.csv"
-ERROR_ANALYSIS_PATH = RESULTS_DIR / "error_analysis.csv"
+RESULTS_DIR = project_path("results")
 
 
-# ── Knowledge Base Collections ─────────────────────────────────────────────────
-# Must be 3-512 characters for ChromaDB
+# ── Knowledge Base ─────────────────────────────────────────────────────────────
 KB_COLLECTION_NAME = "knowledge_base"
 
 
@@ -52,50 +45,13 @@ SUICIDE_CLASSES = ["non-suicide", "suicide"]
 
 # ── Embedding ───────────────────────────────────────────────────────────────────
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-EMBEDDING_DIM   = 384
-BATCH_SIZE      = 64
-
-
-# ── Retrievers ──────────────────────────────────────────────────────────────────
-RetrieverType = Literal["bm25", "dense", "hybrid"]
-
-@dataclass
-class RetrieverConfig:
-    """Base config for any retriever."""
-    k: int = 3
-    type: RetrieverType = "dense"
-    use_knowledge_base: bool = False
-
-@dataclass
-class DenseRetrieverConfig(RetrieverConfig):
-    type: RetrieverType = "dense"
-
-@dataclass
-class BM25RetrieverConfig(RetrieverConfig):
-    type: RetrieverType = "bm25"
-    k1: float = 1.5
-    b: float = 0.75
-
-@dataclass
-class HybridRetrieverConfig(RetrieverConfig):
-    type: RetrieverType = "hybrid"
-    dense_weight: float = 0.5
+EMBEDDING_DIM = 384
+BATCH_SIZE = 64
 
 
 # ── LLM ─────────────────────────────────────────────────────────────────────────
 LLM_MODEL_SIZES = ["0.6b", "1.7b"]
-LLM_BASE_NAME   = "Qwen/Qwen3-{size}"
-THINKING_MODES  = [True, False]
-
-
-# ── Experiment Grid ─────────────────────────────────────────────────────────────
-@dataclass
-class ExperimentConfig:
-    """Single experiment configuration."""
-    model_size: str
-    prompt_type: Literal["zero-shot", "few-shot"]
-    thinking_mode: bool
-    retriever: RetrieverConfig
+THINKING_MODES = [True, False]
 
 
 # ── Prompt Templates ────────────────────────────────────────────────────────────
@@ -108,6 +64,27 @@ FEW_SHOT_TEMPLATE = """Classify the following text as one of: {labels}.
 
 {examples}
 
+Text: {text}
+Label:"""
+
+KB_TEMPLATE = """Using the clinical criteria below, classify the following text as one of: {labels}.
+
+Clinical criteria for suicide risk assessment:
+{context}
+
+Based on these criteria, does the text indicate suicide risk?
+Text: {text}
+Label:"""
+
+COMBINED_TEMPLATE = """Using the clinical criteria below AND the example posts, classify the following text as one of: {labels}.
+
+Clinical criteria for suicide risk assessment:
+{context}
+
+Example posts:
+{examples}
+
+Based on the clinical criteria and the patterns in the examples, classify this text:
 Text: {text}
 Label:"""
 

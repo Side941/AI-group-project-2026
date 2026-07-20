@@ -1,7 +1,7 @@
 """
 experiments/run_suicide.py
 ==========================
-Run suicide detection experiments.
+Run suicide detection experiments with KB retrieval (Dense, BM25, Hybrid).
 """
 
 import sys
@@ -10,75 +10,88 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 from datetime import datetime
-from typing import List, Dict, Any
+from dataclasses import dataclass
+from typing import Literal, List, Dict, Any
 
 from src.config import (
-    ExperimentConfig,
-    DenseRetrieverConfig,
-    BM25RetrieverConfig,
-    HybridRetrieverConfig,
     SUICIDE_TRAIN_PATH,
     SUICIDE_TEST_PATH,
     RESULTS_DIR,
     LLM_MODEL_SIZES,
     THINKING_MODES,
+    get_labels,
+    TEXT_COL,
+    LABEL_COL,
 )
 from src.embedder import Embedder
 from src.evaluate import run_experiment, compute_metrics
 
 
+@dataclass
+class ExperimentConfig:
+    """Single experiment configuration."""
+    model_size: str
+    prompt_type: Literal["zero-shot", "few-shot"]
+    thinking_mode: bool
+    retriever_type: Literal["dense", "bm25", "hybrid"]
+    k: int = 3
+    use_examples: bool = False  # If True, include Reddit examples with KB
+
+
 def generate_experiment_grid() -> List[ExperimentConfig]:
     """Generate all experiment configurations."""
     configs = []
-    
-    # Retriever configurations
-    retrievers = [
-        DenseRetrieverConfig(k=3, use_knowledge_base=False),
-        DenseRetrieverConfig(k=5, use_knowledge_base=False),
-        BM25RetrieverConfig(k=3),
-        BM25RetrieverConfig(k=5),
-        HybridRetrieverConfig(k=3, dense_weight=0.5),
-        HybridRetrieverConfig(k=5, dense_weight=0.5),
-        # Knowledge-based retrievers
-        DenseRetrieverConfig(k=3, use_knowledge_base=True),
-        DenseRetrieverConfig(k=5, use_knowledge_base=True),
-    ]
-    
-    # For each model size
+    retriever_types = ["dense", "bm25", "hybrid"]
+    k_values = [3, 5, 7, 10]
+
     for model_size in LLM_MODEL_SIZES:
-        # For each thinking mode
         for thinking_mode in THINKING_MODES:
             # Zero-shot
             configs.append(ExperimentConfig(
                 model_size=model_size,
                 prompt_type="zero-shot",
                 thinking_mode=thinking_mode,
-                retriever=DenseRetrieverConfig(k=3, use_knowledge_base=False),
+                retriever_type="dense",
+                k=3,
+                use_examples=False,
             ))
-            
-            # Few-shot with each retriever
-            for retriever in retrievers:
-                configs.append(ExperimentConfig(
-                    model_size=model_size,
-                    prompt_type="few-shot",
-                    thinking_mode=thinking_mode,
-                    retriever=retriever,
-                ))
-    
+
+            # Few-shot with KB only (no Reddit examples)
+            for retriever_type in retriever_types:
+                for k in k_values:
+                    configs.append(ExperimentConfig(
+                        model_size=model_size,
+                        prompt_type="few-shot",
+                        thinking_mode=thinking_mode,
+                        retriever_type=retriever_type,
+                        k=k,
+                        use_examples=False,
+                    ))
+
+            # Few-shot with KB + Reddit examples (combined)
+            for retriever_type in retriever_types:
+                for k in k_values:
+                    configs.append(ExperimentConfig(
+                        model_size=model_size,
+                        prompt_type="few-shot",
+                        thinking_mode=thinking_mode,
+                        retriever_type=retriever_type,
+                        k=k,
+                        use_examples=True,
+                    ))
+
     return configs
 
 
-def run_single_experiment(config: ExperimentConfig, test_df: pd.DataFrame, debug: bool = False) -> Dict[str, Any]:
+def run_single_experiment(config: ExperimentConfig, train_df: pd.DataFrame, test_df: pd.DataFrame, debug: bool = False) -> Dict[str, Any]:
     """Run a single experiment and return results."""
+    mode = "Combined (KB+Examples)" if config.use_examples else "KB only"
     print(f"\n{'='*80}")
     print(f"Suicide | {config.model_size} | {config.prompt_type} | "
-          f"{config.retriever.type} | k={config.retriever.k} | "
-          f"KB={getattr(config.retriever, 'use_knowledge_base', False)} | "
+          f"{config.retriever_type} | k={config.k} | {mode} | "
           f"thinking={config.thinking_mode}")
     print(f"{'='*80}")
     
-    # Load training data
-    train_df = pd.read_csv(SUICIDE_TRAIN_PATH)
     print(f"Train: {len(train_df):,} | Test: {len(test_df):,}")
     
     # Run experiment
@@ -101,17 +114,19 @@ def run_single_experiment(config: ExperimentConfig, test_df: pd.DataFrame, debug
         'model_size': config.model_size,
         'prompt_type': config.prompt_type,
         'thinking_mode': config.thinking_mode,
-        'retriever_type': config.retriever.type,
-        'retriever_k': config.retriever.k,
-        'use_knowledge_base': getattr(config.retriever, 'use_knowledge_base', False),
+        'retriever_type': config.retriever_type,
+        'k': config.k,
+        'use_examples': config.use_examples,
         'timestamp': datetime.now().isoformat(),
         'test_size': len(test_df),
     })
     
     # Save detailed results
-    config_name = f"suicide_{config.model_size}_{config.prompt_type}_{config.retriever.type}_k{config.retriever.k}"
-    if getattr(config.retriever, 'use_knowledge_base', False):
-        config_name += "_kb"
+    config_name = f"suicide_{config.model_size}_{config.prompt_type}_{config.retriever_type}_k{config.k}"
+    if config.use_examples:
+        config_name += "_combined"
+    else:
+        config_name += "_kbonly"
     if config.thinking_mode:
         config_name += "_think"
     
@@ -126,7 +141,8 @@ def run_all_experiments(debug: bool = False, limit: int = None, samples: int = N
     """Run all suicide experiments."""
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     
-    # Load test data
+    # Load data
+    train_df = pd.read_csv(SUICIDE_TRAIN_PATH)
     test_df = pd.read_csv(SUICIDE_TEST_PATH)
     
     # Sample if specified
@@ -141,13 +157,15 @@ def run_all_experiments(debug: bool = False, limit: int = None, samples: int = N
         configs = configs[:limit]
     
     print(f"\n🚀 Running {len(configs)} suicide experiments")
+    print(f"   - KB only: retrieves clinical criteria from mhGAP")
+    print(f"   - Combined: retrieves clinical criteria + Reddit examples")
     
     # Run experiments
     all_metrics = []
     for i, config in enumerate(configs):
         print(f"\n📊 Experiment {i+1}/{len(configs)}")
         try:
-            metrics = run_single_experiment(config, test_df, debug=debug)
+            metrics = run_single_experiment(config, train_df, test_df, debug=debug)
             all_metrics.append(metrics)
             print(f"✅ Accuracy: {metrics['accuracy']:.4f} | Nulls: {metrics['null_predictions']}")
         except Exception as e:
@@ -164,12 +182,13 @@ def run_all_experiments(debug: bool = False, limit: int = None, samples: int = N
         
         print(f"\n🏆 Best accuracies:")
         best = summary_df.loc[summary_df['accuracy'].idxmax()]
+        mode = "Combined" if best['use_examples'] else "KB only"
         print(f"   {best['accuracy']:.4f} - {best['model_size']} | {best['prompt_type']} | "
-              f"{best['retriever_type']} | KB={best['use_knowledge_base']}")
+              f"{best['retriever_type']} | k={best['k']} | {mode}")
         
         print(f"\n🏆 Top 5 accuracies:")
         top5 = summary_df.nlargest(5, 'accuracy')[['model_size', 'prompt_type', 'retriever_type', 
-                                                   'use_knowledge_base', 'accuracy', 'null_predictions']]
+                                                   'k', 'use_examples', 'accuracy', 'null_predictions']]
         print(top5.to_string(index=False))
     
     return all_metrics
@@ -178,7 +197,7 @@ def run_all_experiments(debug: bool = False, limit: int = None, samples: int = N
 def main():
     import argparse
     
-    parser = argparse.ArgumentParser(description='Run suicide detection experiments')
+    parser = argparse.ArgumentParser(description='Run suicide detection experiments with KB')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     parser.add_argument('--limit', type=int, default=None, help='Limit number of experiments')
     parser.add_argument('--samples', type=int, default=10, help='Number of test samples (default: 10)')
