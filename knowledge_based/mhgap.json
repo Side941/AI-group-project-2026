@@ -1,0 +1,23 @@
+[
+  {
+    "id": "mhgap_sui_02",
+    "source": "WHO mhGAP-IG",
+    "module": "Self-Harm/Suicide",
+    "section": "Assessment - Imminent Risk",
+    "text": "Imminent risk of self-harm/suicide is indicated by: current thoughts or plan to commit suicide or self-harm; OR history of thoughts or plan of self-harm in the past month or act of self-harm in the past year in a person who is now extremely agitated, violent, distressed or uncommunicative. Look for: severe emotional distress, hopelessness, extreme agitation, violence, uncommunicative behaviour, and social isolation."
+  },
+  {
+    "id": "mhgap_sui_01",
+    "source": "WHO mhGAP-IG",
+    "module": "Self-Harm/Suicide",
+    "section": "Introduction",
+    "text": "Suicide is the act of deliberately killing oneself. Self-harm is a broader term referring to intentional self-inflicted poisoning or injury, which may or may not have a fatal intent or outcome. Any person over 10 years of age experiencing any of the priority conditions, chronic pain, or acute emotional distress should be asked about thoughts or plans of self-harm in the last month and about acts of self-harm in the last year."
+  },
+  {
+    "id": "mhgap_sui_08",
+    "source": "WHO mhGAP-IG",
+    "module": "Self-Harm/Suicide",
+    "section": "Concurrent Conditions",
+    "text": "Assess for concurrent priority mental, neurological or drug use disorders including: depression, alcohol or drug use disorders, bipolar disorder, psychosis, epilepsy, and behavioural disorders. Also assess for chronic pain and emotional symptoms severe enough to warrant clinical management."
+  }
+]
