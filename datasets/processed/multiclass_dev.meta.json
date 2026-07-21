@@ -1,0 +1,53 @@
+{
+  "artifact": "multiclass_dev",
+  "csv_sha256": "a5a4e17aa0d9f71824062ee24b93b9ad844b2c6d11a842f3f316db8df0046fae",
+  "labels": [
+    "suicidal",
+    "depression",
+    "normal"
+  ],
+  "output_csv": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\processed\\multiclass_dev.csv",
+  "output_label_counts": {
+    "depression": 10,
+    "normal": 10,
+    "suicidal": 10
+  },
+  "output_rows": 30,
+  "parent_csv": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\processed\\multiclass_eval.csv",
+  "parent_row_ids": [
+    "rag_0000",
+    "rag_0030",
+    "rag_0039",
+    "rag_0057",
+    "rag_0067",
+    "rag_0071",
+    "rag_0081",
+    "rag_0105",
+    "rag_0113",
+    "rag_0138",
+    "rag_0177",
+    "rag_0186",
+    "rag_0204",
+    "rag_0214",
+    "rag_0218",
+    "rag_0228",
+    "rag_0252",
+    "rag_0260",
+    "rag_0277",
+    "rag_0287",
+    "rag_0300",
+    "rag_0330",
+    "rag_0339",
+    "rag_0357",
+    "rag_0367",
+    "rag_0371",
+    "rag_0381",
+    "rag_0405",
+    "rag_0413",
+    "rag_0438"
+  ],
+  "parent_sha256": "bbfd15c866c983c79a190918484e99b688ec7c8ed8aea5fee1e5264ba0f109e2",
+  "per_class": 10,
+  "purpose": "prompt/k tuning only; switch notebook eval_mode to final for reporting",
+  "seed": 43
+}

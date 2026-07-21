@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Python cache
 __pycache__/
 *.pyc
@@ -48,3 +49,42 @@ data/*.txt
 
 # Environment variables
 .env
+=======
+# Don't push these
+__pycache__/
+*.pyc
+.DS_Store
+venv/
+.vscode/
+knowledge_base/icd_11/chroma_db/
+knowledge_base/icd_11/icd_11.pdf
+knowledge_base/fewshot/
+# Legacy paths (pre-icd_11/ layout)
+knowledge_base/chroma_db/
+knowledge_base/icd_11.pdf
+notebooks/knowledge_base/chroma_db/
+*.csv
+!datasets/processed/multiclass_eval.csv
+!datasets/processed/multiclass_dev.csv
+!datasets/processed/binary_suicide_eval.csv
+!datasets/processed/binary_suicide_dev.csv
+!datasets/processed/multiclass_eval.meta.json
+!datasets/processed/multiclass_dev.meta.json
+!datasets/processed/binary_suicide_eval.meta.json
+!datasets/processed/binary_suicide_dev.meta.json
+!datasets/processed/fewshot_db.meta.json
+/anaconda_projects
+/.virtual_documents
+/components/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+/retriever/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+>>>>>>> rami-experiment

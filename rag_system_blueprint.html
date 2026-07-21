@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>System Blueprint — Depression &amp; Suicide Risk RAG Pipeline</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap');
+
+:root{
+  --bg:#0b1f33;
+  --grid:#123252;
+  --panel:#0f2a45;
+  --panel-border:#1f4368;
+  --cyan:#5ec8e8;
+  --cyan-glow:#a9e6fb;
+  --amber:#f0a84e;
+  --amber-glow:#ffd39a;
+  --text:#eaf3fa;
+  --muted:#7f9cb3;
+  --mono:'JetBrains Mono', monospace;
+  --sans:'Inter', sans-serif;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:
+    repeating-linear-gradient(0deg, var(--grid) 0 1px, transparent 1px 40px),
+    repeating-linear-gradient(90deg, var(--grid) 0 1px, transparent 1px 40px),
+    var(--bg);
+  color:var(--text);
+  font-family:var(--sans);
+  min-height:100vh;
+}
+header{
+  padding:28px 40px 18px;
+  border-bottom:1px solid var(--panel-border);
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-end;
+  flex-wrap:wrap;
+  gap:16px;
+}
+.title-group h1{
+  font-family:var(--mono);
+  font-size:22px;
+  letter-spacing:0.5px;
+  margin:0 0 6px;
+  color:var(--text);
+}
+.title-group .sub{
+  font-family:var(--mono);
+  font-size:12px;
+  color:var(--muted);
+  letter-spacing:1px;
+  text-transform:uppercase;
+}
+.legend{
+  display:flex;
+  gap:22px;
+  font-family:var(--mono);
+  font-size:11px;
+  color:var(--muted);
+  align-items:center;
+}
+.legend .swatch{display:flex;align-items:center;gap:8px;}
+.legend .line{width:26px;height:0;border-top:2px solid var(--cyan);}
+.legend .line.dashed{border-top:2px dashed var(--amber);}
+.hint{
+  font-family:var(--mono);
+  font-size:11px;
+  color:var(--muted);
+  padding:6px 40px 0;
+}
+.hint b{color:var(--cyan-glow);}
+
+#canvas{
+  position:relative;
+  padding:50px 40px 90px;
+  min-width:1180px;
+  overflow-x:auto;
+}
+.layer{
+  position:relative;
+  display:flex;
+  justify-content:center;
+  align-items:stretch;
+  gap:28px;
+  margin-bottom:78px;
+  min-height:1px;
+}
+.layer-label{
+  position:absolute;
+  left:-2px;
+  top:-22px;
+  font-family:var(--mono);
+  font-size:10px;
+  letter-spacing:1.5px;
+  color:var(--muted);
+  text-transform:uppercase;
+}
+
+svg#edges{
+  position:absolute;
+  top:0;left:0;
+  width:100%;
+  height:100%;
+  pointer-events:none;
+  z-index:0;
+}
+
+.node{
+  position:relative;
+  z-index:1;
+  background:var(--panel);
+  border:1.5px solid var(--panel-border);
+  border-radius:2px;
+  padding:14px 16px 12px;
+  width:210px;
+  min-height:96px;
+  transition:border-color .25s, box-shadow .25s;
+}
+.node::before, .node::after,
+.node .c2::before, .node .c2::after{
+  content:"";
+  position:absolute;
+  width:9px;height:9px;
+  border-color:var(--panel-border);
+  transition:border-color .25s;
+}
+.node::before{top:-1.5px;left:-1.5px;border-top:1.5px solid;border-left:1.5px solid;}
+.node::after{top:-1.5px;right:-1.5px;border-top:1.5px solid;border-right:1.5px solid;}
+.node .c2::before{bottom:-1.5px;left:-1.5px;border-bottom:1.5px solid;border-left:1.5px solid;position:absolute;}
+.node .c2::after{bottom:-1.5px;right:-1.5px;border-bottom:1.5px solid;border-right:1.5px solid;position:absolute;}
+
+.node.active{border-color:var(--panel-border);}
+.node.active::before,.node.active::after,.node.active .c2::before,.node.active .c2::after{border-color:var(--cyan);}
+.node.planned{border-color:var(--panel-border);}
+.node.planned::before,.node.planned::after,.node.planned .c2::before,.node.planned .c2::after{border-color:var(--amber);}
+.node.io{border-style:solid;}
+.node.io::before,.node.io::after,.node.io .c2::before,.node.io .c2::after{border-color:var(--muted);}
+
+.node.planned.enabled{box-shadow:0 0 0 1px var(--cyan) inset;}
+.node.planned.enabled::before,.node.planned.enabled::after,.node.planned.enabled .c2::before,.node.planned.enabled .c2::after{border-color:var(--cyan);}
+
+.tag{
+  font-family:var(--mono);
+  font-size:9px;
+  letter-spacing:1px;
+  text-transform:uppercase;
+  color:var(--amber);
+  margin-bottom:6px;
+  display:inline-block;
+}
+.node.active .tag,.node.io .tag{color:var(--cyan);}
+.node.planned.enabled .tag{color:var(--cyan-glow);}
+
+.node h3{
+  font-family:var(--mono);
+  font-size:13px;
+  margin:0 0 6px;
+  outline:none;
+  cursor:text;
+  line-height:1.3;
+}
+.node p{
+  font-size:11.5px;
+  color:var(--muted);
+  margin:0;
+  line-height:1.45;
+  outline:none;
+  cursor:text;
+}
+.node h3:focus,.node p:focus{color:var(--text);}
+
+.toggle-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-top:10px;
+  padding-top:8px;
+  border-top:1px dashed var(--panel-border);
+}
+.toggle-label{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.5px;}
+.switch{
+  width:30px;height:16px;
+  background:#173a5c;
+  border-radius:9px;
+  position:relative;
+  cursor:pointer;
+  flex-shrink:0;
+  transition:background .2s;
+}
+.switch::after{
+  content:"";
+  position:absolute;
+  top:2px;left:2px;
+  width:12px;height:12px;
+  border-radius:50%;
+  background:var(--amber);
+  transition:transform .2s, background .2s;
+}
+.switch.on{background:#164a3e;}
+.switch.on::after{transform:translateX(14px);background:var(--cyan);}
+
+.primary-pick{
+  margin-top:10px;padding-top:8px;
+  border-top:1px dashed var(--panel-border);
+  display:flex;align-items:center;gap:8px;
+  font-family:var(--mono);font-size:9px;color:var(--muted);
+  cursor:pointer;
+}
+.primary-pick .dot{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--muted);flex-shrink:0;}
+.primary-pick.picked{color:var(--cyan-glow);}
+.primary-pick.picked .dot{background:var(--cyan);border-color:var(--cyan);}
+
+.del-btn{
+  position:absolute;top:4px;right:6px;
+  font-family:var(--mono);font-size:12px;color:var(--muted);
+  background:none;border:none;cursor:pointer;line-height:1;
+  z-index:2;
+}
+.del-btn:hover{color:var(--amber);}
+
+.add-node{
+  width:210px;min-height:96px;
+  border:1.5px dashed var(--panel-border);
+  border-radius:2px;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:11px;color:var(--muted);
+  cursor:pointer;background:transparent;
+  transition:border-color .2s, color .2s;
+}
+.add-node:hover{border-color:var(--cyan);color:var(--cyan-glow);}
+
+footer{
+  border-top:1px solid var(--panel-border);
+  padding:16px 40px 26px;
+  display:flex;justify-content:flex-end;
+}
+.stamp{
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--muted);
+  border:1px solid var(--panel-border);
+  padding:10px 16px;
+  display:grid;
+  grid-template-columns:auto auto;
+  gap:4px 18px;
+  min-width:360px;
+}
+.stamp span.k{color:var(--muted);}
+.stamp span.v{color:var(--text);outline:none;cursor:text;}
+.stamp .row{display:contents;}
+
+@media (max-width:900px){
+  #canvas{min-width:1180px;}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title-group">
+    <h1>DEPRESSION / SUICIDE-RISK DETECTION — RAG PIPELINE</h1>
+    <div class="sub">System blueprint · editable</div>
+  </div>
+  <div class="legend">
+    <div class="swatch"><span class="line"></span> implemented</div>
+    <div class="swatch"><span class="line dashed"></span> planned / proposed</div>
+  </div>
+</header>
+<div class="hint">Click any title or description to edit it in place. Flip a switch to mark a planned piece as implemented — its connections light up once everything on both ends is live. Use <b>+ add</b> to extend a row.</div>
+
+<div id="canvas">
+  <svg id="edges"></svg>
+
+  <div class="layer" id="layer-query">
+    <div class="layer-label">input</div>
+  </div>
+
+  <div class="layer" id="layer-retrievers">
+    <div class="layer-label">retrieval layer</div>
+  </div>
+
+  <div class="layer" id="layer-stores">
+    <div class="layer-label">knowledge &amp; example stores</div>
+  </div>
+
+  <div class="layer" id="layer-assembly">
+    <div class="layer-label">prompt assembly</div>
+  </div>
+
+  <div class="layer" id="layer-llm">
+    <div class="layer-label">inference (qwen3)</div>
+  </div>
+
+  <div class="layer" id="layer-classify">
+    <div class="layer-label">classification heads</div>
+  </div>
+
+  <div class="layer" id="layer-output">
+    <div class="layer-label">output</div>
+  </div>
+</div>
+
+<footer>
+  <div class="stamp">
+    <div class="row"><span class="k">PROJECT</span><span class="v" contenteditable="true">AI-group-project-2026</span></div>
+    <div class="row"><span class="k">SYSTEM</span><span class="v" contenteditable="true">ICD-11 + Suicide RAG Classifier</span></div>
+    <div class="row"><span class="k">REV</span><span class="v" contenteditable="true">0.3 — shared preprocessing + few-shot store</span></div>
+    <div class="row"><span class="k">DATE</span><span class="v" contenteditable="true" id="stamp-date"></span></div>
+  </div>
+</footer>
+
+<script>
+document.getElementById('stamp-date').textContent = new Date().toISOString().slice(0,10);
+
+// ---- data model ----
+let uid = 0;
+const nextId = () => 'n' + (uid++);
+
+const nodes = {
+  mcdataset:  {id:'mcdataset', layer:'layer-query', type:'active', title:'Multiclass Dataset', desc:'Processed social-media posts — 3 labels: suicidal / depressed / normal. Built from raw posts after the shared cleaning, length filtering, dedupe, and sampling pipeline.', fixed:true},
+  bindataset: {id:'bindataset', layer:'layer-query', type:'planned', title:'Binary Dataset', desc:'Processed social-media posts for suicide vs. not-suicide, built from raw posts through the same shared preprocessing pipeline as the multiclass head.', fixed:true, toggle:true},
+
+  dense:    {id:'dense', layer:'layer-retrievers', type:'active', title:'Dense Retriever', desc:'Embedding similarity search over indexed chunks (ChromaDB, BioLORD-2023)', fixed:true},
+  bm25:     {id:'bm25', layer:'layer-retrievers', type:'active', title:'BM25 Retriever', desc:'Sparse keyword / term-frequency search', fixed:true},
+  hybrid:   {id:'hybrid', layer:'layer-retrievers', type:'active', title:'Hybrid Retriever', desc:'Fuses dense + BM25 scores into one ranking', fixed:true},
+
+  icd11kb:  {id:'icd11kb', layer:'layer-stores', type:'active', title:'ICD-11 Knowledge Base', desc:'Chunked ICD-11 clinical criteria, section-filtered', fixed:true},
+  suicidekb:{id:'suicidekb', layer:'layer-stores', type:'planned', title:'Suicide Knowledge Base', desc:'New store for suicide-specific clinical material — ICD-11 alone under-covers this', fixed:true, toggle:true},
+  fewshot:  {id:'fewshot', layer:'layer-stores', type:'planned', title:'Few-shot Example Store', desc:'Example (text, label) pairs sampled from the raw datasets after the same shared preprocessing pipeline used by the eval/dev datasets, then indexed for few-shot retrieval.', fixed:true, toggle:true},
+
+  assembly: {id:'assembly', layer:'layer-assembly', type:'active', title:'Context Assembly', desc:'Merges retrieved KB passages + retrieved few-shot examples into the prompt. Few-shot retrieval is planned but the store now shares the same preprocessing path as the main datasets.', fixed:true},
+
+  qwen06:   {id:'qwen06', layer:'layer-llm', type:'active', title:'Qwen3 – 0.6B', desc:'Lighter, faster inference pass — prompted only, no fine-tuning', fixed:true, primary:true},
+  qwen17:   {id:'qwen17', layer:'layer-llm', type:'active', title:'Qwen3 – 1.7B', desc:'Larger model, higher-quality reasoning — prompted only, no fine-tuning', fixed:true, primary:false},
+
+  output:   {id:'output', layer:'layer-output', type:'io', title:'Classification Output', desc:'Predicted label(s) plus the retrieved evidence used', fixed:true},
+};
+
+let edges = [
+  ['mcdataset','dense'],['mcdataset','bm25'],['mcdataset','hybrid'],
+  ['bindataset','dense'],['bindataset','bm25'],['bindataset','hybrid'],
+  ['dense','icd11kb'],['dense','suicidekb'],
+  ['bm25','icd11kb'],['bm25','suicidekb'],
+  ['hybrid','icd11kb'],['hybrid','suicidekb'],
+  ['icd11kb','assembly'],['suicidekb','assembly'],['fewshot','assembly'],
+  ['assembly','qwen06'],['assembly','qwen17'],
+  ['qwen06','output'],['qwen17','output'],
+];
+
+// which existing nodes feed / receive from newly-added nodes at each layer
+const layerWiring = {
+  'layer-retrievers': { from:()=>Object.values(nodes).filter(n=>n.layer==='layer-query').map(n=>n.id), to:()=>Object.values(nodes).filter(n=>n.layer==='layer-stores' && n.id!=='fewshot').map(n=>n.id) },
+  'layer-stores':     { from:()=>Object.values(nodes).filter(n=>n.layer==='layer-retrievers').map(n=>n.id), to:['assembly'] },
+  'layer-llm':         { from:['assembly'], to:()=>Object.values(nodes).filter(n=>n.layer==='layer-classify').map(n=>n.id) },
+  'layer-classify':   { from:()=>Object.values(nodes).filter(n=>n.layer==='layer-llm').map(n=>n.id), to:['output'] },
+};
+
+// ---- render ----
+function isEnabled(n){
+  if(!n.toggle) return true;
+  return !!n.enabled;
+}
+
+function nodeEl(n){
+  const el = document.createElement('div');
+  el.className = 'node ' + n.type + (n.toggle && n.enabled ? ' enabled':'');
+  el.dataset.id = n.id;
+  el.innerHTML = `
+    <span class="tag">${n.type==='io' ? 'I/O' : (n.type==='planned' ? 'planned' : 'implemented')}</span>
+    <h3 contenteditable="true" spellcheck="false">${n.title}</h3>
+    <p contenteditable="true" spellcheck="false">${n.desc}</p>
+    <div class="c2"></div>
+  `;
+  if(n.toggle){
+    const row = document.createElement('div');
+    row.className = 'toggle-row';
+    row.innerHTML = `<span class="toggle-label">implemented</span><div class="switch ${n.enabled?'on':''}"></div>`;
+    row.querySelector('.switch').addEventListener('click', ()=>{
+      n.enabled = !n.enabled;
+      renderAll();
+    });
+    el.appendChild(row);
+  }
+  if(n.hasOwnProperty('primary')){
+    const row = document.createElement('div');
+    row.className = 'primary-pick' + (n.primary ? ' picked':'');
+    row.innerHTML = `<span class="dot"></span><span>${n.primary ? 'primary model' : 'set as primary'}</span>`;
+    row.addEventListener('click', ()=>{
+      Object.values(nodes).forEach(m=>{ if(m.layer==='layer-llm') m.primary=false; });
+      n.primary = true;
+      renderAll();
+    });
+    el.appendChild(row);
+  }
+  if(!n.fixed){
+    const del = document.createElement('button');
+    del.className='del-btn'; del.textContent='×'; del.title='remove';
+    del.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      delete nodes[n.id];
+      edges = edges.filter(([a,b])=>a!==n.id && b!==n.id);
+      renderAll();
+    });
+    el.appendChild(del);
+  }
+  el.querySelector('h3').addEventListener('blur', e=> n.title = e.target.textContent.trim());
+  el.querySelector('p').addEventListener('blur', e=> n.desc = e.target.textContent.trim());
+  return el;
+}
+
+function addNodeButton(layerId){
+  const btn = document.createElement('div');
+  btn.className='add-node';
+  btn.textContent='+ add';
+  btn.addEventListener('click', ()=>{
+    const id = nextId();
+    nodes[id] = {id, layer:layerId, type:'planned', title:'New component', desc:'Describe this piece…', fixed:false, toggle:true, enabled:false};
+    const wiring = layerWiring[layerId];
+    if(wiring){
+      const froms = typeof wiring.from==='function' ? wiring.from() : wiring.from;
+      const tos = typeof wiring.to==='function' ? wiring.to() : wiring.to;
+      froms.forEach(f=> edges.push([f,id]));
+      tos.forEach(t=> edges.push([id,t]));
+    }
+    renderAll();
+  });
+  return btn;
+}
+
+function renderAll(){
+  ['layer-query','layer-retrievers','layer-stores','layer-assembly','layer-llm','layer-classify','layer-output'].forEach(layerId=>{
+    const container = document.getElementById(layerId);
+    container.querySelectorAll('.node,.add-node').forEach(e=>e.remove());
+    Object.values(nodes).filter(n=>n.layer===layerId).forEach(n=>{
+      container.appendChild(nodeEl(n));
+    });
+    if(layerWiring[layerId]){
+      container.appendChild(addNodeButton(layerId));
+    }
+  });
+  requestAnimationFrame(drawEdges);
+}
+
+function drawEdges(){
+  const svg = document.getElementById('edges');
+  const canvas = document.getElementById('canvas');
+  const canvasRect = canvas.getBoundingClientRect();
+  svg.setAttribute('width', canvas.scrollWidth);
+  svg.setAttribute('height', canvas.scrollHeight);
+  svg.innerHTML = '';
+
+  edges.forEach(([aId,bId])=>{
+    const a = nodes[aId], b = nodes[bId];
+    if(!a || !b) return;
+    const aEl = document.querySelector(`.node[data-id="${aId}"]`);
+    const bEl = document.querySelector(`.node[data-id="${bId}"]`);
+    if(!aEl || !bEl) return;
+    const ar = aEl.getBoundingClientRect(), br = bEl.getBoundingClientRect();
+    const x1 = ar.left - canvasRect.left + ar.width/2 + canvas.scrollLeft;
+    const y1 = ar.bottom - canvasRect.top + canvas.scrollTop;
+    const x2 = br.left - canvasRect.left + br.width/2 + canvas.scrollLeft;
+    const y2 = br.top - canvasRect.top + canvas.scrollTop;
+    const midY = (y1+y2)/2;
+    const isSolid = (!a.toggle || a.enabled) && (!b.toggle || b.enabled);
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`);
+    path.setAttribute('fill','none');
+    path.setAttribute('stroke', isSolid ? '#5ec8e8' : '#f0a84e');
+    path.setAttribute('stroke-width','1.5');
+    if(!isSolid) path.setAttribute('stroke-dasharray','5,4');
+    path.setAttribute('opacity', isSolid ? '0.85' : '0.6');
+    svg.appendChild(path);
+  });
+}
+
+window.addEventListener('resize', ()=>requestAnimationFrame(drawEdges));
+renderAll();
+</script>
+</body>
+</html>

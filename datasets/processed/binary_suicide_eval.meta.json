@@ -1,0 +1,40 @@
+{
+  "artifact": "binary_suicide_eval",
+  "csv_sha256": "6fd694c584b20d573ad41732bdd88dab0d944a8947442cb0ab37a795195f4496",
+  "label_counts_clean": {
+    "non-suicide": 110960,
+    "suicide": 99963
+  },
+  "label_counts_raw": {
+    "non-suicide": 116037,
+    "suicide": 116037
+  },
+  "labels": [
+    "suicide",
+    "non-suicide"
+  ],
+  "load_mode": "local",
+  "max_chars": 2000,
+  "min_chars": 40,
+  "output_csv": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\processed\\binary_suicide_eval.csv",
+  "output_label_counts": {
+    "non-suicide": 150,
+    "suicide": 150
+  },
+  "output_rows": 300,
+  "per_class": 150,
+  "rows_after_dedupe": 210923,
+  "rows_after_label_filter": 232074,
+  "rows_after_length_filter": 211012,
+  "rows_dropped_dedupe": 89,
+  "rows_dropped_empty": 2,
+  "rows_dropped_length": 21060,
+  "rows_raw": 232074,
+  "seed": 42,
+  "source_input": {
+    "exists": true,
+    "path": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\raw\\suicide_detection_raw.csv",
+    "size_bytes": 166902029
+  },
+  "task": "binary_suicide_classification"
+}
