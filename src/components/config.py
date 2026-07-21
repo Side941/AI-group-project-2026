@@ -46,9 +46,6 @@ CHROMA_PATH = project_path("knowledge_base", "chroma_db")
 RAW_DATASETS_DIR = project_path("datasets", "raw")
 PROCESSED_DATASETS_DIR = project_path("datasets", "processed")
 RESULTS_DIR = project_path("results")
-RESULTS_METADATA_DIR = RESULTS_DIR / "metadata"
-RESULTS_EXPERIMENTS_DIR = RESULTS_DIR / "experiments"
-VECTOR_STORES_DIR = project_path("vector_stores")
 
 # Hugging Face mental-health corpus (local cache + Hub fallback).
 HF_DATASET_REPO = "ourafla/Mental-Health_Text-Classification_Dataset"
@@ -59,7 +56,7 @@ DATASET_TEST_PATH = RAW_DATASETS_DIR / HF_TEST_FILE
 
 # Stratified multiclass evaluation set (committed; regenerate via experiments/build_multiclass_dataset.py).
 MULTICLASS_EVAL_PATH = PROCESSED_DATASETS_DIR / "multiclass_eval.csv"
-MULTICLASS_EVAL_META_PATH = RESULTS_METADATA_DIR / "multiclass_eval.meta.json"
+MULTICLASS_EVAL_META_PATH = PROCESSED_DATASETS_DIR / "multiclass_eval.meta.json"
 MULTICLASS_LABELS: tuple[str, ...] = ("suicidal", "depression", "normal")
 MULTICLASS_EXCLUDE: tuple[str, ...] = ("anxiety",)
 MULTICLASS_EVAL_PER_CLASS = 150
@@ -69,7 +66,7 @@ MULTICLASS_MAX_CHARS = 2000
 
 # Stratified development slice for prompt/k tuning.
 MULTICLASS_DEV_PATH = PROCESSED_DATASETS_DIR / "multiclass_dev.csv"
-MULTICLASS_DEV_META_PATH = RESULTS_METADATA_DIR / "multiclass_dev.meta.json"
+MULTICLASS_DEV_META_PATH = PROCESSED_DATASETS_DIR / "multiclass_dev.meta.json"
 MULTICLASS_DEV_PER_CLASS = 10
 MULTICLASS_DEV_SEED = 43
 
@@ -91,9 +88,9 @@ DATASET_PATH = MULTICLASS_EVAL_PATH
 # ── Binary suicide classification (raw source + derived eval/dev) ─────────────
 BINARY_SOURCE_PATH = RAW_DATASETS_DIR / "suicide_detection_raw.csv"
 BINARY_EVAL_PATH = PROCESSED_DATASETS_DIR / "binary_suicide_eval.csv"
-BINARY_EVAL_META_PATH = RESULTS_METADATA_DIR / "binary_suicide_eval.meta.json"
+BINARY_EVAL_META_PATH = PROCESSED_DATASETS_DIR / "binary_suicide_eval.meta.json"
 BINARY_DEV_PATH = PROCESSED_DATASETS_DIR / "binary_suicide_dev.csv"
-BINARY_DEV_META_PATH = RESULTS_METADATA_DIR / "binary_suicide_dev.meta.json"
+BINARY_DEV_META_PATH = PROCESSED_DATASETS_DIR / "binary_suicide_dev.meta.json"
 BINARY_LABELS: tuple[str, ...] = ("suicide", "non-suicide")
 BINARY_EVAL_PER_CLASS = 150
 BINARY_EVAL_SEED = 42
@@ -108,12 +105,12 @@ BINARY_DEV_SLICE_PATH = BINARY_DEV_PATH
 BINARY_DATASET_PATH = BINARY_EVAL_PATH
 
 # Experiment run outputs (RAG predictions, summaries, error analysis).
-MULTICLASS_RESULTS_FINAL_PATH = RESULTS_EXPERIMENTS_DIR / "multiclass_rag_results.csv"
-MULTICLASS_RESULTS_SUMMARY_PATH = RESULTS_EXPERIMENTS_DIR / "multiclass_summary.csv"
-MULTICLASS_ERROR_ANALYSIS_PATH = RESULTS_EXPERIMENTS_DIR / "multiclass_error_analysis.csv"
-BINARY_RESULTS_FINAL_PATH = RESULTS_EXPERIMENTS_DIR / "binary_rag_results.csv"
-BINARY_RESULTS_SUMMARY_PATH = RESULTS_EXPERIMENTS_DIR / "binary_summary.csv"
-BINARY_ERROR_ANALYSIS_PATH = RESULTS_EXPERIMENTS_DIR / "binary_error_analysis.csv"
+MULTICLASS_RESULTS_FINAL_PATH = RESULTS_DIR / "multiclass_rag_results.csv"
+MULTICLASS_RESULTS_SUMMARY_PATH = RESULTS_DIR / "multiclass_summary.csv"
+MULTICLASS_ERROR_ANALYSIS_PATH = RESULTS_DIR / "multiclass_error_analysis.csv"
+BINARY_RESULTS_FINAL_PATH = RESULTS_DIR / "binary_rag_results.csv"
+BINARY_RESULTS_SUMMARY_PATH = RESULTS_DIR / "binary_summary.csv"
+BINARY_ERROR_ANALYSIS_PATH = RESULTS_DIR / "binary_error_analysis.csv"
 
 # Backward-compatible aliases.
 RAG_RESULTS_FINAL_PATH = MULTICLASS_RESULTS_FINAL_PATH
@@ -121,11 +118,13 @@ RAG_RESULTS_SUMMARY_PATH = MULTICLASS_RESULTS_SUMMARY_PATH
 RAG_ERROR_ANALYSIS_PATH = MULTICLASS_ERROR_ANALYSIS_PATH
 
 # ── Few-shot vector store (blueprint: planned) ────────────────────────────────
-# This vector DB is built from the raw datasets (multiclass + binary) and can
-# be queried later to assemble dynamic few-shot prompts. We do not wire it
-# into retrieval yet.
-FEWSHOT_CHROMA_PATH = VECTOR_STORES_DIR / "fewshot_chroma_db"
-FEWSHOT_DB_META_PATH = RESULTS_METADATA_DIR / "fewshot_db.meta.json"
+# This store is built from the raw datasets (multiclass + binary) and can be
+# queried later to assemble dynamic few-shot prompts.
+FEWSHOT_STORE_DIR = project_path("knowledge_base", "fewshot")
+FEWSHOT_CHROMA_PATH = FEWSHOT_STORE_DIR / "chroma_db"
+FEWSHOT_MULTICLASS_EXAMPLES_PATH = FEWSHOT_STORE_DIR / "multiclass_examples.json"
+FEWSHOT_BINARY_EXAMPLES_PATH = FEWSHOT_STORE_DIR / "binary_examples.json"
+FEWSHOT_DB_META_PATH = PROCESSED_DATASETS_DIR / "fewshot_db.meta.json"
 
 FEWSHOT_COLLECTION_MULTICLASS = "fewshot_multiclass"
 FEWSHOT_COLLECTION_BINARY = "fewshot_binary"

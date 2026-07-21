@@ -1,1 +1,1 @@
-"""Retriever package: BM25, dense, and hybrid ICD-11 retrieval."""
+"""Retriever package: ICD-11 and few-shot BM25/dense/hybrid retrieval."""

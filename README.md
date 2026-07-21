@@ -3,10 +3,9 @@
 Prompted RAG classifiers over ICD-11 clinical criteria (Qwen via Ollama). The repo is organized so a first-time runner can distinguish:
 
 - `datasets/raw/` for source CSVs
-- `datasets/processed/` for derived eval/dev CSVs
-- `results/metadata/` for provenance files
-- `results/experiments/` for notebook outputs
-- `vector_stores/` for non-ICD Chroma stores such as the few-shot DB
+- `datasets/processed/` for derived eval/dev CSVs and their provenance meta JSON
+- `results/` for notebook experiment outputs
+- `knowledge_base/` for ICD-11 assets plus the few-shot store
 
 ## Quick orientation
 
@@ -14,9 +13,9 @@ Prompted RAG classifiers over ICD-11 clinical criteria (Qwen via Ollama). The re
 |----------|--------|----------|-------------|
 | KB build | `experiments/run_kb_pipeline.py` | `notebooks/01_kb_pipeline_demo.ipynb` | `knowledge_base/chroma_db/` |
 | Multiclass dataset prep | `experiments/build_multiclass_dataset.py` | `notebooks/02_multiclass_dataset_prep.ipynb` | `datasets/processed/multiclass_*.csv` |
-| Multiclass RAG eval | notebook-driven | `notebooks/03_multiclass_rag.ipynb` | `results/experiments/multiclass_*.csv` |
+| Multiclass RAG eval | notebook-driven | `notebooks/03_multiclass_rag.ipynb` | `results/multiclass_*.csv` |
 | Binary dataset prep | `experiments/build_binary_dataset.py` | `notebooks/04_binary_rag.ipynb` | `datasets/processed/binary_suicide_*.csv` |
-| Rebuild everything + few-shot DB | `experiments/rebuild_all_artifacts.py` | none | processed CSVs + `vector_stores/fewshot_chroma_db/` |
+| Rebuild everything + few-shot DB | `experiments/rebuild_all_artifacts.py` | none | processed CSVs + `knowledge_base/fewshot/` |
 
 ## Project structure
 
@@ -24,28 +23,25 @@ Prompted RAG classifiers over ICD-11 clinical criteria (Qwen via Ollama). The re
 AI-group-project-2026/
 ├── datasets/
 │   ├── raw/                     # Source CSVs / local caches
-│   └── processed/               # Derived eval/dev datasets used by notebooks
+│   └── processed/               # Derived eval/dev CSVs + meta JSON
 ├── experiments/                 # Runnable scripts only
 │   ├── run_kb_pipeline.py
 │   ├── build_multiclass_dataset.py
 │   ├── build_binary_dataset.py
 │   └── rebuild_all_artifacts.py
-├── knowledge_base/              # ICD-11 assets and main Chroma store
+├── knowledge_base/              # ICD-11 assets + few-shot store
 │   ├── icd11_chunks.json
-│   └── chroma_db/
+│   ├── chroma_db/               # ICD-11 dense store
+│   └── fewshot/                 # Few-shot examples JSON + Chroma DB
 ├── notebooks/                   # Human-facing walkthroughs / experiments
 │   ├── 01_kb_pipeline_demo.ipynb
 │   ├── 02_multiclass_dataset_prep.ipynb
 │   ├── 03_multiclass_rag.ipynb
 │   └── 04_binary_rag.ipynb
-├── results/
-│   ├── metadata/                # Dataset + few-shot provenance JSON
-│   └── experiments/             # Notebook output CSVs
+├── results/                     # Notebook experiment output CSVs
 ├── src/
 │   ├── components/              # Config, chunker, ingestion
 │   └── retriever/               # BM25, dense, hybrid, section expander
-├── vector_stores/
-│   └── fewshot_chroma_db/       # Planned few-shot retrieval store
 ├── rag_system_blueprint.html
 ├── requirements.txt
 └── README.md
@@ -84,8 +80,8 @@ Raw/cache inputs:
 Processed outputs:
 - `datasets/processed/multiclass_eval.csv` — 450 posts (150/class)
 - `datasets/processed/multiclass_dev.csv` — 30 posts (10/class)
-- `results/metadata/multiclass_eval.meta.json`
-- `results/metadata/multiclass_dev.meta.json`
+- `datasets/processed/multiclass_eval.meta.json`
+- `datasets/processed/multiclass_dev.meta.json`
 
 Labels: `suicidal`, `depression`, `normal`  
 Excluded: `anxiety`
@@ -104,8 +100,8 @@ Raw input:
 Processed outputs:
 - `datasets/processed/binary_suicide_eval.csv` — 300 posts (150/class)
 - `datasets/processed/binary_suicide_dev.csv` — 20 posts (10/class)
-- `results/metadata/binary_suicide_eval.meta.json`
-- `results/metadata/binary_suicide_dev.meta.json`
+- `datasets/processed/binary_suicide_eval.meta.json`
+- `datasets/processed/binary_suicide_dev.meta.json`
 
 Labels: `suicide`, `non-suicide`
 
@@ -147,7 +143,7 @@ Run the first path-setup cell before anything else:
 - `notebooks/03_multiclass_rag.ipynb`
 - `notebooks/04_binary_rag.ipynb`
 
-Current experiment outputs are written under `results/experiments/`.
+Current experiment outputs are written under `results/`.
 
 ## Notes
 

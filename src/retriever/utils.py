@@ -7,7 +7,12 @@ import nltk  # type: ignore
 from nltk.corpus import stopwords  # type: ignore
 from nltk.stem import PorterStemmer  # type: ignore
 
-from components.config import CHUNKS_PATH, resolve_path
+from components.config import (
+    CHUNKS_PATH,
+    FEWSHOT_BINARY_EXAMPLES_PATH,
+    FEWSHOT_MULTICLASS_EXAMPLES_PATH,
+    resolve_path,
+)
 
 nltk.download("punkt", quiet=True)
 nltk.download("punkt_tab", quiet=True)
@@ -39,6 +44,37 @@ def load_chunks(json_path: str | Path | None = None) -> list[dict]:
         chunk["text"] = chunk.get("embed_text") or chunk.get("prompt_text", "")
 
     return chunks
+
+
+def load_fewshot_examples(
+    json_path: str | Path | None = None,
+    *,
+    head: str | None = None,
+) -> list[dict]:
+    """Load few-shot example rows exported by rebuild_all_artifacts.py."""
+    if json_path is None:
+        if head == "binary":
+            path = FEWSHOT_BINARY_EXAMPLES_PATH
+        else:
+            path = FEWSHOT_MULTICLASS_EXAMPLES_PATH
+    else:
+        default = FEWSHOT_BINARY_EXAMPLES_PATH if head == "binary" else FEWSHOT_MULTICLASS_EXAMPLES_PATH
+        path = resolve_path(json_path, default)
+
+    if not path.exists():
+        raise FileNotFoundError(f"Few-shot examples file not found: {path}")
+
+    with open(path, encoding="utf-8") as f:
+        try:
+            rows = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in few-shot examples file: {e}") from e
+
+    for row in rows:
+        row["text"] = row.get("text") or row.get("post", "")
+        row["post"] = row.get("post") or row.get("text", "")
+        row["id"] = row.get("id") or f"{row.get('head', head or 'fewshot')}_{row.get('label', 'unknown')}"
+    return rows
 
 
 def filter_chunks_by_sections(

@@ -46,6 +46,7 @@ if _exp not in sys.path:
 from components.config import (  # noqa: E402
     BINARY_LABELS,
     EMBEDDING_MODEL,
+    FEWSHOT_BINARY_EXAMPLES_PATH,
     FEWSHOT_BUILD_SEED,
     FEWSHOT_CHROMA_PATH,
     FEWSHOT_COLLECTION_BINARY,
@@ -54,6 +55,7 @@ from components.config import (  # noqa: E402
     FEWSHOT_EMBED_BATCH_SIZE,
     FEWSHOT_EMBEDDING_MAX_SEQ_LENGTH,
     FEWSHOT_BINARY_MAX_PER_CLASS,
+    FEWSHOT_MULTICLASS_EXAMPLES_PATH,
     FEWSHOT_MULTICLASS_MAX_PER_LABEL,
     RAG_EVAL_LABELS,
 )
@@ -92,6 +94,31 @@ def _sample_balanced(df: pd.DataFrame, *, labels: list[str], per_label: int, see
         columns=["_label_order"]
     )
     return out.reset_index(drop=True)
+
+
+def _export_examples_json(
+    frame: pd.DataFrame,
+    *,
+    head: str,
+    path: Path,
+    id_prefix: str,
+) -> list[dict]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows: list[dict] = []
+    for idx, row in frame.reset_index(drop=True).iterrows():
+        rows.append(
+            {
+                "id": f"{id_prefix}_{idx:06d}",
+                "head": head,
+                "post": row["text"],
+                "label": row["label"],
+                "text": row["text"],  # alias for downstream retriever convenience
+                "source_split": row.get("source_split", "source"),
+            }
+        )
+    path.write_text(json.dumps(rows, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"Wrote {path} ({len(rows)} examples)")
+    return rows
 
 
 def _embed_and_write_collection(
@@ -189,10 +216,19 @@ def build_fewshot_db(*, rebuild: bool, seed: int) -> dict:
     chroma_client = chromadb.PersistentClient(path=str(FEWSHOT_CHROMA_PATH))
 
     # Multiclass collection
-    multi_texts = multi_sample["text"].tolist()
-    multi_labels = multi_sample["label"].tolist()
-    multi_ids = [f"mc_{i:06d}" for i in range(len(multi_texts))]
-    multi_metas = [{"head": "multiclass", "label": lbl} for lbl in multi_labels]
+    multi_rows = _export_examples_json(
+        multi_sample,
+        head="multiclass",
+        path=FEWSHOT_MULTICLASS_EXAMPLES_PATH,
+        id_prefix="mc",
+    )
+    multi_texts = [row["post"] for row in multi_rows]
+    multi_labels = [row["label"] for row in multi_rows]
+    multi_ids = [row["id"] for row in multi_rows]
+    multi_metas = [
+        {"head": row["head"], "label": row["label"], "source_split": row["source_split"]}
+        for row in multi_rows
+    ]
     _embed_and_write_collection(
         chroma_client=chroma_client,
         collection_name=FEWSHOT_COLLECTION_MULTICLASS,
@@ -204,10 +240,19 @@ def build_fewshot_db(*, rebuild: bool, seed: int) -> dict:
     )
 
     # Binary collection
-    bin_texts = bin_sample["text"].tolist()
-    bin_labels = bin_sample["label"].tolist()
-    bin_ids = [f"bin_{i:06d}" for i in range(len(bin_texts))]
-    bin_metas = [{"head": "binary", "label": lbl} for lbl in bin_labels]
+    bin_rows = _export_examples_json(
+        bin_sample,
+        head="binary",
+        path=FEWSHOT_BINARY_EXAMPLES_PATH,
+        id_prefix="bin",
+    )
+    bin_texts = [row["post"] for row in bin_rows]
+    bin_labels = [row["label"] for row in bin_rows]
+    bin_ids = [row["id"] for row in bin_rows]
+    bin_metas = [
+        {"head": row["head"], "label": row["label"], "source_split": row["source_split"]}
+        for row in bin_rows
+    ]
     _embed_and_write_collection(
         chroma_client=chroma_client,
         collection_name=FEWSHOT_COLLECTION_BINARY,
@@ -225,12 +270,14 @@ def build_fewshot_db(*, rebuild: bool, seed: int) -> dict:
         "collections": {
             "multiclass": {
                 "collection_name": FEWSHOT_COLLECTION_MULTICLASS,
+                "examples_json": str(FEWSHOT_MULTICLASS_EXAMPLES_PATH),
                 "per_label": FEWSHOT_MULTICLASS_MAX_PER_LABEL,
                 "labels": list(RAG_EVAL_LABELS),
                 "total_vectors": int(len(multi_texts)),
             },
             "binary": {
                 "collection_name": FEWSHOT_COLLECTION_BINARY,
+                "examples_json": str(FEWSHOT_BINARY_EXAMPLES_PATH),
                 "per_class": FEWSHOT_BINARY_MAX_PER_CLASS,
                 "labels": list(BINARY_LABELS),
                 "total_vectors": int(len(bin_texts)),
