@@ -39,9 +39,10 @@ BATCH_SIZE = 64
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
-PDF_PATH = project_path("knowledge_base", "icd_11.pdf")
-CHUNKS_PATH = project_path("knowledge_base", "icd11_chunks.json")
-CHROMA_PATH = project_path("knowledge_base", "chroma_db")
+ICD11_STORE_DIR = project_path("knowledge_base", "icd_11")
+PDF_PATH = ICD11_STORE_DIR / "icd_11.pdf"
+CHUNKS_PATH = ICD11_STORE_DIR / "icd11_chunks.json"
+CHROMA_PATH = ICD11_STORE_DIR / "chroma_db"
 
 RAW_DATASETS_DIR = project_path("datasets", "raw")
 PROCESSED_DATASETS_DIR = project_path("datasets", "processed")

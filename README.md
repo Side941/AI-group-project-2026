@@ -5,14 +5,14 @@ Prompted RAG classifiers over ICD-11 clinical criteria (Qwen via Ollama). The re
 - `datasets/raw/` for source CSVs
 - `datasets/processed/` for derived eval/dev CSVs and their provenance meta JSON
 - `results/` for notebook experiment outputs
-- `knowledge_base/` for ICD-11 assets plus the few-shot store
+- `knowledge_base/` for ICD-11 assets (`icd_11/`) plus the few-shot store
 - `src/builders/` for runnable build scripts
 
 ## Quick orientation
 
 | Workflow | Script | Notebook | Main output |
 |----------|--------|----------|-------------|
-| KB build | `src/builders/run_kb_pipeline.py` | `notebooks/01_kb_pipeline_demo.ipynb` | `knowledge_base/chroma_db/` |
+| KB build | `src/builders/run_kb_pipeline.py` | `notebooks/01_kb_pipeline_demo.ipynb` | `knowledge_base/icd_11/chroma_db/` |
 | Multiclass dataset prep | `src/builders/build_multiclass_dataset.py` | `notebooks/02_multiclass_dataset_prep.ipynb` | `datasets/processed/multiclass_*.csv` |
 | Multiclass RAG eval | notebook-driven | `notebooks/03_multiclass_rag.ipynb` | `results/multiclass_*.csv` |
 | Binary dataset prep | `src/builders/build_binary_dataset.py` | `notebooks/04_binary_rag.ipynb` | `datasets/processed/binary_suicide_*.csv` |
@@ -25,9 +25,11 @@ AI-group-project-2026/
 ├── datasets/
 │   ├── raw/                     # Source CSVs / local caches
 │   └── processed/               # Derived eval/dev CSVs + meta JSON
-├── knowledge_base/              # ICD-11 assets + few-shot store
-│   ├── icd11_chunks.json
-│   ├── chroma_db/               # ICD-11 dense store
+├── knowledge_base/              # Vector stores + source docs
+│   ├── icd_11/                  # ICD-11 PDF, chunks, dense Chroma store
+│   │   ├── icd_11.pdf
+│   │   ├── icd11_chunks.json
+│   │   └── chroma_db/
 │   └── fewshot/                 # Few-shot examples JSON + Chroma DB
 ├── notebooks/                   # Human-facing walkthroughs / experiments
 │   ├── 01_kb_pipeline_demo.ipynb
@@ -58,9 +60,9 @@ Also needed locally:
 
 | Path | Role |
 |------|------|
-| `knowledge_base/icd_11.pdf` | Source PDF for chunking |
-| `knowledge_base/icd11_chunks.json` | Chunked ICD-11 criteria |
-| `knowledge_base/chroma_db/` | Dense ICD-11 vector store |
+| `knowledge_base/icd_11/icd_11.pdf` | Source PDF for chunking |
+| `knowledge_base/icd_11/icd11_chunks.json` | Chunked ICD-11 criteria |
+| `knowledge_base/icd_11/chroma_db/` | Dense ICD-11 vector store |
 | `datasets/raw/suicide_detection_raw.csv` | Binary source dataset |
 | Ollama + `qwen3:0.6b` / `qwen3:1.7b` | LLM inference for notebooks |
 

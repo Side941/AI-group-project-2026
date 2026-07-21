@@ -4,8 +4,11 @@ __pycache__/
 .DS_Store
 venv/
 .vscode/
-knowledge_base/chroma_db/
+knowledge_base/icd_11/chroma_db/
+knowledge_base/icd_11/icd_11.pdf
 knowledge_base/fewshot/
+# Legacy paths (pre-icd_11/ layout)
+knowledge_base/chroma_db/
 knowledge_base/icd_11.pdf
 notebooks/knowledge_base/chroma_db/
 *.csv
