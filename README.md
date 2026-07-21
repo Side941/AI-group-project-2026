@@ -36,6 +36,7 @@ AI-group-project-2026/
 │   ├── 02_multiclass_dataset_prep.ipynb
 │   ├── 03_multiclass_rag.ipynb
 │   └── 04_binary_rag.ipynb
+├── experiments/                 # Small pipeline smoke tests (.py)
 ├── results/                     # Notebook experiment output CSVs
 ├── src/
 │   ├── builders/                # Dataset + KB + few-shot build scripts
@@ -131,6 +132,19 @@ Useful flags:
 ```bash
 python src/builders/rebuild_all_artifacts.py --skip-evals
 python src/builders/rebuild_all_artifacts.py --reuse-fewshot-db
+```
+
+### Smoke experiments
+
+Small scripts under `experiments/` to verify the current pipeline without opening notebooks:
+
+```bash
+python experiments/smoke_paths.py
+python experiments/smoke_retrieval.py --skip-dense
+python experiments/smoke_retrieval.py
+python experiments/smoke_fewshot.py
+python experiments/smoke_rag_oneshot.py          # needs Ollama
+python experiments/run_smoke_suite.py --skip-dense
 ```
 
 ### Notebooks
