@@ -16,7 +16,7 @@
   "load_mode": "local",
   "max_chars": 2000,
   "min_chars": 40,
-  "output_csv": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\processed\\binary_suicide_eval.csv",
+  "output_csv": "/Users/sidemoctardialla/Desktop/AI-group-project-2026/datasets/processed/binary_suicide_eval.csv",
   "output_label_counts": {
     "non-suicide": 150,
     "suicide": 150
@@ -33,7 +33,7 @@
   "seed": 42,
   "source_input": {
     "exists": true,
-    "path": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\raw\\suicide_detection_raw.csv",
+    "path": "/Users/sidemoctardialla/Desktop/AI-group-project-2026/datasets/raw/suicide_detection_raw.csv",
     "size_bytes": 166902029
   },
   "task": "binary_suicide_classification"

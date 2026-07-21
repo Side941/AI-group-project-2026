@@ -1,23 +1,3 @@
-<<<<<<< HEAD
-# Core
-numpy>=1.24.0
-pandas>=2.0.0
-tqdm>=4.65.0
-
-# Embeddings & Retrieval
-sentence-transformers>=2.2.0
-rank-bm25>=0.2.2
-scikit-learn>=1.3.0
-
-# LLM Inference
-torch>=2.0.0
-transformers>=4.40.0
-accelerate>=0.27.0
-
-# Analysis (notebook)
-matplotlib>=3.7.0
-seaborn>=0.12.0
-=======
 nltk==3.9.4
 numpy==2.1.3
 pandas==2.2.3
@@ -27,4 +7,17 @@ sentence-transformers==4.1.0
 faiss-cpu==1.14.3
 chromadb
 tqdm
->>>>>>> rami-experiment
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -4,7 +4,7 @@
   "collections": {
     "binary": {
       "collection_name": "fewshot_binary",
-      "examples_json": "C:\\Users\\Ramy\\AI-group-project-2026\\knowledge_base\\fewshot\\binary_examples.json",
+      "examples_json": "/Users/sidemoctardialla/Desktop/AI-group-project-2026/knowledge_base/fewshot/binary_examples.json",
       "labels": [
         "suicide",
         "non-suicide"
@@ -14,7 +14,7 @@
     },
     "multiclass": {
       "collection_name": "fewshot_multiclass",
-      "examples_json": "C:\\Users\\Ramy\\AI-group-project-2026\\knowledge_base\\fewshot\\multiclass_examples.json",
+      "examples_json": "/Users/sidemoctardialla/Desktop/AI-group-project-2026/knowledge_base/fewshot/multiclass_examples.json",
       "labels": [
         "suicidal",
         "depression",

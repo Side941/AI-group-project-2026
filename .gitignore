@@ -1,55 +1,3 @@
-<<<<<<< HEAD
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Virtual environment
-venv/
-env/
-.venv/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# ChromaDB (large vector databases)
-**/chroma_db/
-**/kb_chromadb/
-datasets/chroma_db/
-knowledge_based/kb_chromadb/
-
-# Results (auto-generated)
-results/
-
-# All CSV files (datasets are too large)
-datasets/*.csv
-
-# Data files (large PDFs)
-data/*.pdf
-data/*.txt
-
-# Notebook checkpoints
-.ipynb_checkpoints/
-*/.ipynb_checkpoints/
-
-# Jupyter
-*.ipynb
-!notebooks/*.ipynb
-
-# Logs
-*.log
-
-# Environment variables
-.env
-=======
 # Don't push these
 __pycache__/
 *.pyc
@@ -87,4 +35,3 @@ notebooks/knowledge_base/chroma_db/
 /notebooks/.ipynb_checkpoints
 /notebooks/.ipynb_checkpoints
 /notebooks/.ipynb_checkpoints
->>>>>>> rami-experiment
