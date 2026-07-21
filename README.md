@@ -144,9 +144,25 @@ python experiments/smoke_retrieval.py --skip-dense
 python experiments/smoke_retrieval.py
 python experiments/smoke_fewshot.py
 python experiments/smoke_rag_oneshot.py          # needs Ollama
-python experiments/exp_fewshot_rag.py --dry-run  # retrieved few-shot → prompt
-python experiments/exp_fewshot_rag.py --compare  # needs Ollama
 python experiments/run_smoke_suite.py --skip-dense
+```
+
+### Few-shot retrieval RAG experiment
+
+Dynamic few-shot examples from `knowledge_base/fewshot/` (optional ICD-11 context):
+
+```bash
+# Inspect retrieved examples + assembled prompt (no Ollama)
+python experiments/exp_fewshot_rag.py --dry-run
+
+# Full run with few-shot BM25 + ICD-11 BM25
+python experiments/exp_fewshot_rag.py --query depression
+
+# Few-shot hybrid only (no clinical KB)
+python experiments/exp_fewshot_rag.py --kb-retriever none --fewshot-retriever hybrid
+
+# Compare: zero-shot vs few-shot vs few-shot+KB
+python experiments/exp_fewshot_rag.py --compare --query suicidal
 ```
 
 ### Notebooks
