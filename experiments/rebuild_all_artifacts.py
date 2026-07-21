@@ -13,6 +13,9 @@ Blueprint alignment:
 Important:
 - We build the vector DB, but we do NOT wire retrieval from it into the
   classification pipeline yet.
+- Few-shot examples are taken from the raw datasets, but they are passed
+  through the same cleaning / filtering pipeline used by the processed
+  evaluation datasets before they are sampled and embedded.
 
 Run:
     python experiments/rebuild_all_artifacts.py
@@ -20,11 +23,9 @@ Run:
 
 from __future__ import annotations
 
-import hashlib
 import argparse
 import json
 import random
-import re
 import runpy
 import sys
 from pathlib import Path
@@ -33,25 +34,17 @@ import pandas as pd
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SRC = _PROJECT_ROOT / "src"
+_EXPERIMENTS = _PROJECT_ROOT / "experiments"
 for _path in (_SRC, _SRC / "retriever"):
     _s = str(_path)
     if _s not in sys.path:
         sys.path.insert(0, _s)
+_exp = str(_EXPERIMENTS)
+if _exp not in sys.path:
+    sys.path.insert(0, _exp)
 
 from components.config import (  # noqa: E402
-    BINARY_EVAL_PER_CLASS,
-    BINARY_EVAL_SEED,
-    BINARY_EVAL_SUBSET_PATH,
-    BINARY_DEV_PER_CLASS,
-    BINARY_DEV_SEED,
-    BINARY_DEV_META_PATH,
-    BINARY_DEV_SLICE_PATH,
     BINARY_LABELS,
-    BINARY_MAX_CHARS,
-    BINARY_MIN_CHARS,
-    BINARY_SOURCE_PATH,
-    DATASET_TEST_PATH,
-    DATASET_TRAIN_PATH,
     EMBEDDING_MODEL,
     FEWSHOT_BUILD_SEED,
     FEWSHOT_CHROMA_PATH,
@@ -62,128 +55,22 @@ from components.config import (  # noqa: E402
     FEWSHOT_EMBEDDING_MAX_SEQ_LENGTH,
     FEWSHOT_BINARY_MAX_PER_CLASS,
     FEWSHOT_MULTICLASS_MAX_PER_LABEL,
-    HF_DATASET_REPO,
-    HF_TEST_FILE,
-    HF_TRAIN_FILE,
-    RAG_EVAL_EXCLUDE,
     RAG_EVAL_LABELS,
-    RAG_EVAL_MAX_CHARS,
-    RAG_EVAL_MIN_CHARS,
-    RAG_EVAL_PER_CLASS,
-    RAG_EVAL_SEED,
-    RAG_EVAL_SUBSET_PATH,
-    RAG_DEV_META_PATH,
-    RAG_DEV_PER_CLASS,
-    RAG_DEV_SEED,
-    RAG_DEV_SLICE_PATH,
-    BATCH_SIZE,
-    COLLECTION_NAME,
 )
-
-_WHITESPACE_RE = re.compile(r"\s+")
-_URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
-
-def _clean_text(text: str) -> str:
-    text = str(text).strip()
-    text = _URL_RE.sub(" ", text)
-    text = _WHITESPACE_RE.sub(" ", text).strip()
-    return text
-
-
-def _ensure_multiclass_cached() -> pd.DataFrame:
-    """Return concatenated train+test dataframe with columns: text, label."""
-    local_ok = DATASET_TRAIN_PATH.exists() and DATASET_TEST_PATH.exists()
-    if local_ok:
-        train_df = pd.read_csv(DATASET_TRAIN_PATH)
-        test_df = pd.read_csv(DATASET_TEST_PATH)
-    else:
-        from datasets import load_dataset
-
-        ds = load_dataset(
-            HF_DATASET_REPO,
-            data_files={"train": HF_TRAIN_FILE, "test": HF_TEST_FILE},
-        )
-        train_df = ds["train"].to_pandas()
-        test_df = ds["test"].to_pandas()
-
-        # Cache for offline reuse.
-        DATASET_TRAIN_PATH.parent.mkdir(parents=True, exist_ok=True)
-        test_df.to_csv(DATASET_TEST_PATH, index=False)
-        train_df.to_csv(DATASET_TRAIN_PATH, index=False)
-
-    def normalize(df: pd.DataFrame, split: str) -> pd.DataFrame:
-        if "status" not in df.columns or "text" not in df.columns:
-            raise ValueError(
-                f"Expected columns 'text' and 'status' in multiclass dataset ({split})."
-            )
-        return pd.DataFrame(
-            {
-                "text": df["text"].astype(str),
-                "label": df["status"].astype(str).str.strip().str.lower(),
-                "source_split": split,
-            }
-        )
-
-    return pd.concat(
-        [normalize(train_df, "train"), normalize(test_df, "test")],
-        ignore_index=True,
-    )
+import build_binary_dataset as binary_builder  # noqa: E402
+import build_multiclass_dataset as multiclass_builder  # noqa: E402
 
 
 def _build_multiclass_fewshot_pool() -> pd.DataFrame:
-    df = _ensure_multiclass_cached()
-
-    exclude = {label.lower() for label in RAG_EVAL_EXCLUDE}
-    keep = {label.lower() for label in RAG_EVAL_LABELS}
-    df = df[~df["label"].isin(exclude)].copy()
-    df = df[df["label"].isin(keep)].copy()
-
-    df["text"] = df["text"].map(_clean_text)
-    df = df[df["text"].str.len() > 0].copy()
-
-    df = df[
-        (df["text"].str.len() >= RAG_EVAL_MIN_CHARS)
-        & (df["text"].str.len() <= RAG_EVAL_MAX_CHARS)
-    ].copy()
-
-    # Dedupe for consistent sampling.
-    df["_text_key"] = df["text"].str.lower()
-    df = df.drop_duplicates(subset=["_text_key"], keep="first").drop(
-        columns=["_text_key"]
-    )
-    return df.reset_index(drop=True)
+    raw, _ = multiclass_builder.load_raw_frames()
+    cleaned, _ = multiclass_builder.filter_and_clean(raw)
+    return cleaned.reset_index(drop=True)
 
 
 def _build_binary_fewshot_pool() -> pd.DataFrame:
-    if not BINARY_SOURCE_PATH.exists():
-        raise FileNotFoundError(
-            f"Missing {BINARY_SOURCE_PATH}. Place the raw binary source CSV under datasets/raw/."
-        )
-    raw = pd.read_csv(BINARY_SOURCE_PATH)
-    if "text" not in raw.columns or "class" not in raw.columns:
-        raise ValueError(
-            f"The binary raw dataset must contain columns 'text' and 'class'. Got {list(raw.columns)}"
-        )
-
-    df = pd.DataFrame(
-        {"text": raw["text"].astype(str), "label": raw["class"].astype(str).str.strip().str.lower()}
-    )
-    keep = {label.lower() for label in BINARY_LABELS}
-    df = df[df["label"].isin(keep)].copy()
-
-    df["text"] = df["text"].map(_clean_text)
-    df = df[df["text"].str.len() > 0].copy()
-
-    df = df[
-        (df["text"].str.len() >= BINARY_MIN_CHARS)
-        & (df["text"].str.len() <= BINARY_MAX_CHARS)
-    ].copy()
-
-    df["_text_key"] = df["text"].str.lower()
-    df = df.drop_duplicates(subset=["_text_key"], keep="first").drop(
-        columns=["_text_key"]
-    )
-    return df.reset_index(drop=True)
+    raw, _ = binary_builder.load_raw_frame()
+    cleaned, _ = binary_builder.filter_and_clean(raw)
+    return cleaned.reset_index(drop=True)
 
 
 def _sample_balanced(df: pd.DataFrame, *, labels: list[str], per_label: int, seed: int) -> pd.DataFrame:
@@ -275,8 +162,9 @@ def _embed_and_write_collection(
 
 
 def build_fewshot_db(*, rebuild: bool, seed: int) -> dict:
-    # Build pools from raw datasets
-    print("\nBuilding few-shot pools from raw datasets …")
+    # Build pools from raw datasets using the same cleaning/filter pipeline
+    # as the processed eval/dev builders for consistency.
+    print("\nBuilding few-shot pools from raw datasets via the shared preprocessing pipeline …")
     multi_pool = _build_multiclass_fewshot_pool()
     bin_pool = _build_binary_fewshot_pool()
 
