@@ -18,7 +18,7 @@ Important:
   evaluation datasets before they are sampled and embedded.
 
 Run:
-    python experiments/rebuild_all_artifacts.py
+    python src/builders/rebuild_all_artifacts.py
 """
 
 from __future__ import annotations
@@ -32,16 +32,13 @@ from pathlib import Path
 
 import pandas as pd
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_SRC = _PROJECT_ROOT / "src"
-_EXPERIMENTS = _PROJECT_ROOT / "experiments"
-for _path in (_SRC, _SRC / "retriever"):
+_BUILDERS_DIR = Path(__file__).resolve().parent
+_SRC = _BUILDERS_DIR.parent
+_PROJECT_ROOT = _SRC.parent
+for _path in (_SRC, _SRC / "retriever", _BUILDERS_DIR):
     _s = str(_path)
     if _s not in sys.path:
         sys.path.insert(0, _s)
-_exp = str(_EXPERIMENTS)
-if _exp not in sys.path:
-    sys.path.insert(0, _exp)
 
 from components.config import (  # noqa: E402
     BINARY_LABELS,
@@ -323,8 +320,8 @@ def main() -> None:
     if args.skip_evals:
         print("Skipping eval/dev rebuild.")
     else:
-        runpy.run_path(str(_PROJECT_ROOT / "experiments" / "build_multiclass_dataset.py"), run_name="__main__")
-        runpy.run_path(str(_PROJECT_ROOT / "experiments" / "build_binary_dataset.py"), run_name="__main__")
+        runpy.run_path(str(_BUILDERS_DIR / "build_multiclass_dataset.py"), run_name="__main__")
+        runpy.run_path(str(_BUILDERS_DIR / "build_binary_dataset.py"), run_name="__main__")
 
     # Always build few-shot DB (this is the main request).
     print("=== Build few-shot vector DB ===")

@@ -54,7 +54,7 @@ HF_TEST_FILE = "mental_health_test.csv"
 DATASET_TRAIN_PATH = RAW_DATASETS_DIR / HF_TRAIN_FILE
 DATASET_TEST_PATH = RAW_DATASETS_DIR / HF_TEST_FILE
 
-# Stratified multiclass evaluation set (committed; regenerate via experiments/build_multiclass_dataset.py).
+# Stratified multiclass evaluation set (committed; regenerate via src/builders/build_multiclass_dataset.py).
 MULTICLASS_EVAL_PATH = PROCESSED_DATASETS_DIR / "multiclass_eval.csv"
 MULTICLASS_EVAL_META_PATH = PROCESSED_DATASETS_DIR / "multiclass_eval.meta.json"
 MULTICLASS_LABELS: tuple[str, ...] = ("suicidal", "depression", "normal")

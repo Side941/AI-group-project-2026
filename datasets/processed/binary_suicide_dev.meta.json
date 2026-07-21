@@ -5,13 +5,13 @@
     "suicide",
     "non-suicide"
   ],
-  "output_csv": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\binary_suicide_dev.csv",
+  "output_csv": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\processed\\binary_suicide_dev.csv",
   "output_label_counts": {
     "non-suicide": 10,
     "suicide": 10
   },
   "output_rows": 20,
-  "parent_csv": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\binary_suicide_eval.csv",
+  "parent_csv": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\processed\\binary_suicide_eval.csv",
   "parent_row_ids": [
     "bin_0000",
     "bin_0030",

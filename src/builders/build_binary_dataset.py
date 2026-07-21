@@ -9,7 +9,7 @@ Outputs:
 2) datasets/processed/binary_suicide_dev.csv   — prompt/k tuning slice drawn from (1) (10/class = 20)
 
 Automation entrypoint:
-    python experiments/build_binary_dataset.py
+    python src/builders/build_binary_dataset.py
 
 Re-running with the same inputs and seeds must produce identical processed
 CSVs and metadata.
@@ -25,9 +25,10 @@ from pathlib import Path
 
 import pandas as pd
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_SRC = _PROJECT_ROOT / "src"
-for _path in (_SRC, _SRC / "retriever"):
+_BUILDERS_DIR = Path(__file__).resolve().parent
+_SRC = _BUILDERS_DIR.parent
+_PROJECT_ROOT = _SRC.parent
+for _path in (_SRC, _SRC / "retriever", _BUILDERS_DIR):
     _s = str(_path)
     if _s not in sys.path:
         sys.path.insert(0, _s)

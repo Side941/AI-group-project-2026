@@ -6,16 +6,17 @@ Prompted RAG classifiers over ICD-11 clinical criteria (Qwen via Ollama). The re
 - `datasets/processed/` for derived eval/dev CSVs and their provenance meta JSON
 - `results/` for notebook experiment outputs
 - `knowledge_base/` for ICD-11 assets plus the few-shot store
+- `src/builders/` for runnable build scripts
 
 ## Quick orientation
 
 | Workflow | Script | Notebook | Main output |
 |----------|--------|----------|-------------|
-| KB build | `experiments/run_kb_pipeline.py` | `notebooks/01_kb_pipeline_demo.ipynb` | `knowledge_base/chroma_db/` |
-| Multiclass dataset prep | `experiments/build_multiclass_dataset.py` | `notebooks/02_multiclass_dataset_prep.ipynb` | `datasets/processed/multiclass_*.csv` |
+| KB build | `src/builders/run_kb_pipeline.py` | `notebooks/01_kb_pipeline_demo.ipynb` | `knowledge_base/chroma_db/` |
+| Multiclass dataset prep | `src/builders/build_multiclass_dataset.py` | `notebooks/02_multiclass_dataset_prep.ipynb` | `datasets/processed/multiclass_*.csv` |
 | Multiclass RAG eval | notebook-driven | `notebooks/03_multiclass_rag.ipynb` | `results/multiclass_*.csv` |
-| Binary dataset prep | `experiments/build_binary_dataset.py` | `notebooks/04_binary_rag.ipynb` | `datasets/processed/binary_suicide_*.csv` |
-| Rebuild everything + few-shot DB | `experiments/rebuild_all_artifacts.py` | none | processed CSVs + `knowledge_base/fewshot/` |
+| Binary dataset prep | `src/builders/build_binary_dataset.py` | `notebooks/04_binary_rag.ipynb` | `datasets/processed/binary_suicide_*.csv` |
+| Rebuild everything + few-shot DB | `src/builders/rebuild_all_artifacts.py` | none | processed CSVs + `knowledge_base/fewshot/` |
 
 ## Project structure
 
@@ -24,11 +25,6 @@ AI-group-project-2026/
 ├── datasets/
 │   ├── raw/                     # Source CSVs / local caches
 │   └── processed/               # Derived eval/dev CSVs + meta JSON
-├── experiments/                 # Runnable scripts only
-│   ├── run_kb_pipeline.py
-│   ├── build_multiclass_dataset.py
-│   ├── build_binary_dataset.py
-│   └── rebuild_all_artifacts.py
 ├── knowledge_base/              # ICD-11 assets + few-shot store
 │   ├── icd11_chunks.json
 │   ├── chroma_db/               # ICD-11 dense store
@@ -40,8 +36,9 @@ AI-group-project-2026/
 │   └── 04_binary_rag.ipynb
 ├── results/                     # Notebook experiment output CSVs
 ├── src/
+│   ├── builders/                # Dataset + KB + few-shot build scripts
 │   ├── components/              # Config, chunker, ingestion
-│   └── retriever/               # BM25, dense, hybrid, section expander
+│   └── retriever/               # BM25, dense, hybrid, few-shot retrievers
 ├── rag_system_blueprint.html
 ├── requirements.txt
 └── README.md
@@ -89,7 +86,7 @@ Excluded: `anxiety`
 Build or rebuild:
 
 ```bash
-python experiments/build_multiclass_dataset.py
+python src/builders/build_multiclass_dataset.py
 ```
 
 ### Binary suicide
@@ -108,7 +105,7 @@ Labels: `suicide`, `non-suicide`
 Build or rebuild:
 
 ```bash
-python experiments/build_binary_dataset.py
+python src/builders/build_binary_dataset.py
 ```
 
 ## Running
@@ -116,22 +113,22 @@ python experiments/build_binary_dataset.py
 ### Knowledge-base pipeline
 
 ```bash
-python experiments/run_kb_pipeline.py
-python experiments/run_kb_pipeline.py --skip-chunking
-python experiments/run_kb_pipeline.py --rebuild
+python src/builders/run_kb_pipeline.py
+python src/builders/run_kb_pipeline.py --skip-chunking
+python src/builders/run_kb_pipeline.py --rebuild
 ```
 
 ### Rebuild all datasets + few-shot vector DB
 
 ```bash
-python experiments/rebuild_all_artifacts.py
+python src/builders/rebuild_all_artifacts.py
 ```
 
 Useful flags:
 
 ```bash
-python experiments/rebuild_all_artifacts.py --skip-evals
-python experiments/rebuild_all_artifacts.py --reuse-fewshot-db
+python src/builders/rebuild_all_artifacts.py --skip-evals
+python src/builders/rebuild_all_artifacts.py --reuse-fewshot-db
 ```
 
 ### Notebooks

@@ -11,7 +11,7 @@ Documented walkthrough (orchestration + inspection + explanations):
     notebooks/01_kb_pipeline_demo.ipynb
 
 Prefer that notebook for thesis-facing explanation. This file remains the
-automation entrypoint (`python experiments/run_kb_pipeline.py`).
+automation entrypoint (`python src/builders/run_kb_pipeline.py`).
 """
 
 from __future__ import annotations
@@ -20,9 +20,10 @@ import argparse
 import sys
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_SRC = _PROJECT_ROOT / "src"
-for _path in (_SRC, _SRC / "retriever"):
+_BUILDERS_DIR = Path(__file__).resolve().parent
+_SRC = _BUILDERS_DIR.parent
+_PROJECT_ROOT = _SRC.parent
+for _path in (_SRC, _SRC / "retriever", _BUILDERS_DIR):
     _s = str(_path)
     if _s not in sys.path:
         sys.path.insert(0, _s)
