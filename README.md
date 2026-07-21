@@ -144,6 +144,8 @@ python experiments/smoke_retrieval.py --skip-dense
 python experiments/smoke_retrieval.py
 python experiments/smoke_fewshot.py
 python experiments/smoke_rag_oneshot.py          # needs Ollama
+python experiments/exp_fewshot_rag.py --dry-run  # retrieved few-shot → prompt
+python experiments/exp_fewshot_rag.py --compare  # needs Ollama
 python experiments/run_smoke_suite.py --skip-dense
 ```
 
@@ -161,6 +163,6 @@ Current experiment outputs are written under `results/`.
 ## Notes
 
 - Retrievers: `bm25`, `dense`, `hybrid` (weighted RRF).
-- Both classifiers currently retrieve only from the ICD-11 KB.
-- The few-shot vector DB is built and stored separately, but it is not wired into prompt retrieval yet.
+- Both classifiers currently retrieve only from the ICD-11 KB in the notebooks.
+- The few-shot vector DB can be exercised via `experiments/exp_fewshot_rag.py` (dynamic retrieved examples in the prompt); notebooks still use static few-shot templates.
 - CPU is the default fallback; GPU is used when available for embeddings.
