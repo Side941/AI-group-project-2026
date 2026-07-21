@@ -36,6 +36,7 @@ AI-group-project-2026/
 │   ├── 02_multiclass_dataset_prep.ipynb
 │   ├── 03_multiclass_rag.ipynb
 │   └── 04_binary_rag.ipynb
+├── experiments/                 # Small pipeline smoke tests (.py)
 ├── results/                     # Notebook experiment output CSVs
 ├── src/
 │   ├── builders/                # Dataset + KB + few-shot build scripts
@@ -133,6 +134,37 @@ python src/builders/rebuild_all_artifacts.py --skip-evals
 python src/builders/rebuild_all_artifacts.py --reuse-fewshot-db
 ```
 
+### Smoke experiments
+
+Small scripts under `experiments/` to verify the current pipeline without opening notebooks:
+
+```bash
+python experiments/smoke_paths.py
+python experiments/smoke_retrieval.py --skip-dense
+python experiments/smoke_retrieval.py
+python experiments/smoke_fewshot.py
+python experiments/smoke_rag_oneshot.py          # needs Ollama
+python experiments/run_smoke_suite.py --skip-dense
+```
+
+### Few-shot retrieval RAG experiment
+
+Dynamic few-shot examples from `knowledge_base/fewshot/` (optional ICD-11 context):
+
+```bash
+# Inspect retrieved examples + assembled prompt (no Ollama)
+python experiments/exp_fewshot_rag.py --dry-run
+
+# Full run with few-shot BM25 + ICD-11 BM25
+python experiments/exp_fewshot_rag.py --query depression
+
+# Few-shot hybrid only (no clinical KB)
+python experiments/exp_fewshot_rag.py --kb-retriever none --fewshot-retriever hybrid
+
+# Compare: zero-shot vs few-shot vs few-shot+KB
+python experiments/exp_fewshot_rag.py --compare --query suicidal
+```
+
 ### Notebooks
 
 Run the first path-setup cell before anything else:
@@ -147,6 +179,6 @@ Current experiment outputs are written under `results/`.
 ## Notes
 
 - Retrievers: `bm25`, `dense`, `hybrid` (weighted RRF).
-- Both classifiers currently retrieve only from the ICD-11 KB.
-- The few-shot vector DB is built and stored separately, but it is not wired into prompt retrieval yet.
+- Both classifiers currently retrieve only from the ICD-11 KB in the notebooks.
+- The few-shot vector DB can be exercised via `experiments/exp_fewshot_rag.py` (dynamic retrieved examples in the prompt); notebooks still use static few-shot templates.
 - CPU is the default fallback; GPU is used when available for embeddings.
