@@ -1,19 +1,19 @@
 """
-build_rag_eval_subset.py
-========================
-CLI entrypoint to build reproducible stratified RAG evaluation artifacts:
+build_multiclass_dataset.py
+===========================
+Build reproducible stratified multiclass evaluation artifacts:
 
-1) rag_eval_subset.csv  — final reporting set (150/class = 450)
-2) rag_dev_slice.csv    — prompt/k tuning slice drawn from (1) (10/class = 30)
+1) datasets/processed/multiclass_eval.csv  — final reporting set (150/class = 450)
+2) datasets/processed/multiclass_dev.csv   — prompt/k tuning slice drawn from (1) (10/class = 30)
 
-Documented walkthrough (full stage logic + inspection + explanations):
-    notebooks/02_dataset_prep_demo.ipynb
+Documented walkthrough:
+    notebooks/02_multiclass_dataset_prep.ipynb
 
-Prefer that notebook for thesis-facing explanation. This file remains the
-automation entrypoint (`python experiments/build_rag_eval_subset.py`).
+Automation entrypoint:
+    python experiments/build_multiclass_dataset.py
 
-Prefer local CSVs under datasets/; fall back to the Hugging Face Hub.
-Re-running with the same inputs and seeds must produce identical CSVs.
+Raw HF CSV caches live under datasets/raw/. Re-running with the same inputs
+and seeds must produce identical processed CSVs and metadata.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pandas as pd
 
-# Allow `python experiments/build_rag_eval_subset.py` from the repo root.
+# Allow `python experiments/build_multiclass_dataset.py` from the repo root.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SRC = _PROJECT_ROOT / "src"
 for _path in (_SRC, _SRC / "retriever"):
@@ -262,7 +262,7 @@ def build() -> tuple[pd.DataFrame, pd.DataFrame]:
         id_prefix="rag",
     )
     eval_meta = {
-        "artifact": "rag_eval_subset",
+        "artifact": "multiclass_eval",
         "seed": RAG_EVAL_SEED,
         "per_class": RAG_EVAL_PER_CLASS,
         "labels": list(RAG_EVAL_LABELS),
@@ -284,7 +284,7 @@ def build() -> tuple[pd.DataFrame, pd.DataFrame]:
         id_prefix="dev",
     )
     dev_meta = {
-        "artifact": "rag_dev_slice",
+        "artifact": "multiclass_dev",
         "seed": RAG_DEV_SEED,
         "per_class": RAG_DEV_PER_CLASS,
         "labels": list(RAG_EVAL_LABELS),

@@ -1,16 +1,18 @@
 """
-build_binary_suicide_subset.py
-==============================
-CLI entrypoint to build reproducible stratified binary suicide eval artifacts
-from datasets/Suicide_Detection.csv:
+build_binary_dataset.py
+=======================
+Build reproducible stratified binary suicide evaluation artifacts from:
+    datasets/raw/suicide_detection_raw.csv
 
-1) binary_suicide_eval.csv  — final reporting set (150/class = 300)
-2) binary_suicide_dev.csv   — prompt/k tuning slice drawn from (1) (10/class = 20)
+Outputs:
+1) datasets/processed/binary_suicide_eval.csv  — final reporting set (150/class = 300)
+2) datasets/processed/binary_suicide_dev.csv   — prompt/k tuning slice drawn from (1) (10/class = 20)
 
 Automation entrypoint:
-    python experiments/build_binary_suicide_subset.py
+    python experiments/build_binary_dataset.py
 
-Re-running with the same inputs and seeds must produce identical CSVs.
+Re-running with the same inputs and seeds must produce identical processed
+CSVs and metadata.
 """
 
 from __future__ import annotations
@@ -63,7 +65,7 @@ def load_raw_frame() -> tuple[pd.DataFrame, dict]:
     if not BINARY_SOURCE_PATH.exists():
         raise FileNotFoundError(
             f"Binary source CSV not found: {BINARY_SOURCE_PATH}. "
-            "Place Suicide_Detection.csv under datasets/."
+            "Place the raw source file under datasets/raw/."
         )
     print(f"Loading local CSV:\n  {BINARY_SOURCE_PATH}")
     raw = pd.read_csv(BINARY_SOURCE_PATH)

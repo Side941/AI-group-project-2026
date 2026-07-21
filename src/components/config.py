@@ -32,45 +32,68 @@ def resolve_path(path: str | Path | None = None, default: Path | None = None) ->
     return chosen if chosen.is_absolute() else PROJECT_ROOT / chosen
 
 
+# ── Model / collection ─────────────────────────────────────────────────────────
+COLLECTION_NAME = "icd11_clinical"
+EMBEDDING_MODEL = "FremyCompany/BioLORD-2023"
+BATCH_SIZE = 64
+
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
-PDF_PATH     = project_path("knowledge_base", "icd_11.pdf")
-CHUNKS_PATH  = project_path("knowledge_base", "icd11_chunks.json")
-CHROMA_PATH  = project_path("knowledge_base", "chroma_db")
+PDF_PATH = project_path("knowledge_base", "icd_11.pdf")
+CHUNKS_PATH = project_path("knowledge_base", "icd11_chunks.json")
+CHROMA_PATH = project_path("knowledge_base", "chroma_db")
+
+RAW_DATASETS_DIR = project_path("datasets", "raw")
+PROCESSED_DATASETS_DIR = project_path("datasets", "processed")
+RESULTS_DIR = project_path("results")
+RESULTS_METADATA_DIR = RESULTS_DIR / "metadata"
+RESULTS_EXPERIMENTS_DIR = RESULTS_DIR / "experiments"
+VECTOR_STORES_DIR = project_path("vector_stores")
+
 # Hugging Face mental-health corpus (local cache + Hub fallback).
 HF_DATASET_REPO = "ourafla/Mental-Health_Text-Classification_Dataset"
-HF_TRAIN_FILE = "mental_heath_unbanlanced.csv"
-HF_TEST_FILE = "mental_health_combined_test.csv"
-DATASET_TRAIN_PATH = project_path("datasets", HF_TRAIN_FILE)
-DATASET_TEST_PATH = project_path("datasets", HF_TEST_FILE)
+HF_TRAIN_FILE = "mental_health_train.csv"
+HF_TEST_FILE = "mental_health_test.csv"
+DATASET_TRAIN_PATH = RAW_DATASETS_DIR / HF_TRAIN_FILE
+DATASET_TEST_PATH = RAW_DATASETS_DIR / HF_TEST_FILE
 
-# Stratified RAG evaluation subset (committed; regenerate via experiments/build_rag_eval_subset.py).
-RAG_EVAL_SUBSET_PATH = project_path("datasets", "rag_eval_subset.csv")
-RAG_EVAL_META_PATH = project_path("results", "rag_eval_subset.meta.json")
-RAG_EVAL_LABELS: tuple[str, ...] = ("suicidal", "depression", "normal")
-RAG_EVAL_EXCLUDE: tuple[str, ...] = ("anxiety",)
-RAG_EVAL_PER_CLASS = 150
-RAG_EVAL_SEED = 42
-RAG_EVAL_MIN_CHARS = 40
-RAG_EVAL_MAX_CHARS = 2000
+# Stratified multiclass evaluation set (committed; regenerate via experiments/build_multiclass_dataset.py).
+MULTICLASS_EVAL_PATH = PROCESSED_DATASETS_DIR / "multiclass_eval.csv"
+MULTICLASS_EVAL_META_PATH = RESULTS_METADATA_DIR / "multiclass_eval.meta.json"
+MULTICLASS_LABELS: tuple[str, ...] = ("suicidal", "depression", "normal")
+MULTICLASS_EXCLUDE: tuple[str, ...] = ("anxiety",)
+MULTICLASS_EVAL_PER_CLASS = 150
+MULTICLASS_EVAL_SEED = 42
+MULTICLASS_MIN_CHARS = 40
+MULTICLASS_MAX_CHARS = 2000
 
-# Stratified development slice for prompt/k tuning (subset of the final eval set).
-# Use eval_mode="dev" in the notebook while iterating; switch to "final" for reporting.
-RAG_DEV_SLICE_PATH = project_path("datasets", "rag_dev_slice.csv")
-RAG_DEV_META_PATH = project_path("results", "rag_dev_slice.meta.json")
-RAG_DEV_PER_CLASS = 10
-RAG_DEV_SEED = 43
+# Stratified development slice for prompt/k tuning.
+MULTICLASS_DEV_PATH = PROCESSED_DATASETS_DIR / "multiclass_dev.csv"
+MULTICLASS_DEV_META_PATH = RESULTS_METADATA_DIR / "multiclass_dev.meta.json"
+MULTICLASS_DEV_PER_CLASS = 10
+MULTICLASS_DEV_SEED = 43
 
-# Default notebook dataset path points at the final eval set.
-DATASET_PATH = RAG_EVAL_SUBSET_PATH
+# Backward-compatible aliases used by current scripts/notebooks.
+RAG_EVAL_SUBSET_PATH = MULTICLASS_EVAL_PATH
+RAG_EVAL_META_PATH = MULTICLASS_EVAL_META_PATH
+RAG_EVAL_LABELS = MULTICLASS_LABELS
+RAG_EVAL_EXCLUDE = MULTICLASS_EXCLUDE
+RAG_EVAL_PER_CLASS = MULTICLASS_EVAL_PER_CLASS
+RAG_EVAL_SEED = MULTICLASS_EVAL_SEED
+RAG_EVAL_MIN_CHARS = MULTICLASS_MIN_CHARS
+RAG_EVAL_MAX_CHARS = MULTICLASS_MAX_CHARS
+RAG_DEV_SLICE_PATH = MULTICLASS_DEV_PATH
+RAG_DEV_META_PATH = MULTICLASS_DEV_META_PATH
+RAG_DEV_PER_CLASS = MULTICLASS_DEV_PER_CLASS
+RAG_DEV_SEED = MULTICLASS_DEV_SEED
+DATASET_PATH = MULTICLASS_EVAL_PATH
 
-# ── Binary suicide classification (Suicide_Detection.csv) ─────────────────────
-# Labels kept as in the source CSV: suicide / non-suicide.
-BINARY_SOURCE_PATH = project_path("datasets", "Suicide_Detection.csv")
-BINARY_EVAL_SUBSET_PATH = project_path("datasets", "binary_suicide_eval.csv")
-BINARY_EVAL_META_PATH = project_path("results", "binary_suicide_eval.meta.json")
-BINARY_DEV_SLICE_PATH = project_path("datasets", "binary_suicide_dev.csv")
-BINARY_DEV_META_PATH = project_path("results", "binary_suicide_dev.meta.json")
+# ── Binary suicide classification (raw source + derived eval/dev) ─────────────
+BINARY_SOURCE_PATH = RAW_DATASETS_DIR / "suicide_detection_raw.csv"
+BINARY_EVAL_PATH = PROCESSED_DATASETS_DIR / "binary_suicide_eval.csv"
+BINARY_EVAL_META_PATH = RESULTS_METADATA_DIR / "binary_suicide_eval.meta.json"
+BINARY_DEV_PATH = PROCESSED_DATASETS_DIR / "binary_suicide_dev.csv"
+BINARY_DEV_META_PATH = RESULTS_METADATA_DIR / "binary_suicide_dev.meta.json"
 BINARY_LABELS: tuple[str, ...] = ("suicide", "non-suicide")
 BINARY_EVAL_PER_CLASS = 150
 BINARY_EVAL_SEED = 42
@@ -78,21 +101,43 @@ BINARY_DEV_PER_CLASS = 10
 BINARY_DEV_SEED = 43
 BINARY_MIN_CHARS = 40
 BINARY_MAX_CHARS = 2000
-BINARY_DATASET_PATH = BINARY_EVAL_SUBSET_PATH
+
+# Backward-compatible aliases.
+BINARY_EVAL_SUBSET_PATH = BINARY_EVAL_PATH
+BINARY_DEV_SLICE_PATH = BINARY_DEV_PATH
+BINARY_DATASET_PATH = BINARY_EVAL_PATH
 
 # Experiment run outputs (RAG predictions, summaries, error analysis).
-RESULTS_DIR = project_path("results")
-RAG_RESULTS_FINAL_PATH = RESULTS_DIR / "rag_results_final.csv"
-RAG_RESULTS_SUMMARY_PATH = RESULTS_DIR / "rag_results_summary.csv"
-RAG_ERROR_ANALYSIS_PATH = RESULTS_DIR / "error_analysis_best_config.csv"
-BINARY_RESULTS_FINAL_PATH = RESULTS_DIR / "binary_rag_results_final.csv"
-BINARY_RESULTS_SUMMARY_PATH = RESULTS_DIR / "binary_rag_results_summary.csv"
-BINARY_ERROR_ANALYSIS_PATH = RESULTS_DIR / "binary_error_analysis_best_config.csv"
+MULTICLASS_RESULTS_FINAL_PATH = RESULTS_EXPERIMENTS_DIR / "multiclass_rag_results.csv"
+MULTICLASS_RESULTS_SUMMARY_PATH = RESULTS_EXPERIMENTS_DIR / "multiclass_summary.csv"
+MULTICLASS_ERROR_ANALYSIS_PATH = RESULTS_EXPERIMENTS_DIR / "multiclass_error_analysis.csv"
+BINARY_RESULTS_FINAL_PATH = RESULTS_EXPERIMENTS_DIR / "binary_rag_results.csv"
+BINARY_RESULTS_SUMMARY_PATH = RESULTS_EXPERIMENTS_DIR / "binary_summary.csv"
+BINARY_ERROR_ANALYSIS_PATH = RESULTS_EXPERIMENTS_DIR / "binary_error_analysis.csv"
 
-# ── Model / collection ─────────────────────────────────────────────────────────
-COLLECTION_NAME = "icd11_clinical"
-EMBEDDING_MODEL = "FremyCompany/BioLORD-2023"
-BATCH_SIZE      = 64
+# Backward-compatible aliases.
+RAG_RESULTS_FINAL_PATH = MULTICLASS_RESULTS_FINAL_PATH
+RAG_RESULTS_SUMMARY_PATH = MULTICLASS_RESULTS_SUMMARY_PATH
+RAG_ERROR_ANALYSIS_PATH = MULTICLASS_ERROR_ANALYSIS_PATH
+
+# ── Few-shot vector store (blueprint: planned) ────────────────────────────────
+# This vector DB is built from the raw datasets (multiclass + binary) and can
+# be queried later to assemble dynamic few-shot prompts. We do not wire it
+# into retrieval yet.
+FEWSHOT_CHROMA_PATH = VECTOR_STORES_DIR / "fewshot_chroma_db"
+FEWSHOT_DB_META_PATH = RESULTS_METADATA_DIR / "fewshot_db.meta.json"
+
+FEWSHOT_COLLECTION_MULTICLASS = "fewshot_multiclass"
+FEWSHOT_COLLECTION_BINARY = "fewshot_binary"
+
+# Deterministic per-label sampling caps (keeps the store size reasonable).
+FEWSHOT_MULTICLASS_MAX_PER_LABEL = 200
+FEWSHOT_BINARY_MAX_PER_CLASS = 200
+FEWSHOT_BUILD_SEED = 1337
+
+# Embedding model + performance knobs (reuses the same ICD-11 embedding model).
+FEWSHOT_EMBEDDING_MAX_SEQ_LENGTH = 512
+FEWSHOT_EMBED_BATCH_SIZE = BATCH_SIZE
 
 # ── PDF page range (pdftotext page numbers; printed page ≈ PDF − 18) ──────────
 # Clinical CDDR starts at Neurodevelopmental intro / 6A00 (not List of categories).
