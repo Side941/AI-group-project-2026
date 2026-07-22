@@ -161,7 +161,7 @@ def format_examples_block(examples: list[dict]) -> str:
         return ""
     lines = []
     for ex in examples:
-        post = (ex.get("post") or ex.get("text") or "").strip()
+        post = (ex.get("text") or "").strip()
         label = ex.get("label", "")
         lines.append(f'Post: "{post}"\nLabel: {label}')
     return "\nExamples:\n" + "\n\n".join(lines) + "\n---\n"

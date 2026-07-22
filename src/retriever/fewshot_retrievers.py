@@ -72,7 +72,7 @@ class FewShotBM25Retriever:
     def __init__(self, *, head: str, examples: list[dict] | None = None, json_path: str | None = None):
         self.head = head
         self.examples = examples if examples is not None else load_fewshot_examples(json_path, head=head)
-        self.tokenized_examples = [tokenize(example.get("post", example.get("text", ""))) for example in self.examples]
+        self.tokenized_examples = [tokenize(example.get("text", "")) for example in self.examples]
         self.bm25 = BM25Okapi(self.tokenized_examples)
         print(f"Few-shot BM25 retriever ready: {head} ({len(self.examples)} examples)")
 
@@ -130,9 +130,7 @@ class FewShotDenseRetriever:
             rows.append(
                 {
                     "id": ids[i] if i < len(ids) else f"{self.head}_{i}",
-                    "head": meta.get("head", self.head),
                     "label": meta["label"],
-                    "post": doc,
                     "text": doc,
                     "source_split": meta.get("source_split", "source"),
                     "dense_score": 1 - dist,

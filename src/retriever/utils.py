@@ -69,8 +69,7 @@ def load_fewshot_examples(
 
     for row in rows:
         row["text"] = row.get("text") or row.get("post", "")
-        row["post"] = row.get("post") or row.get("text", "")
-        row["id"] = row.get("id") or f"{row.get('head', head or 'fewshot')}_{row.get('label', 'unknown')}"
+        row["id"] = row.get("id") or f"fewshot_{row.get('label', 'unknown')}"
     return rows
 
 

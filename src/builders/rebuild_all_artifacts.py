@@ -84,7 +84,6 @@ def _sample_balanced(df: pd.DataFrame, *, labels: list[str], per_label: int, see
 def _export_examples_json(
     frame: pd.DataFrame,
     *,
-    head: str,
     path: Path,
     id_prefix: str,
 ) -> list[dict]:
@@ -94,10 +93,8 @@ def _export_examples_json(
         rows.append(
             {
                 "id": f"{id_prefix}_{idx:06d}",
-                "head": head,
-                "post": row["text"],
+                "text": row["text"],
                 "label": row["label"],
-                "text": row["text"],  # alias for downstream retriever convenience
                 "source_split": row.get("source_split", "source"),
             }
         )
@@ -200,15 +197,14 @@ def build_fewshot_db(*, rebuild: bool, seed: int) -> dict:
 
     multi_rows = _export_examples_json(
         multi_sample,
-        head="multiclass",
         path=FEWSHOT_MULTICLASS_EXAMPLES_PATH,
         id_prefix="mc",
     )
-    multi_texts = [row["post"] for row in multi_rows]
+    multi_texts = [row["text"] for row in multi_rows]
     multi_labels = [row["label"] for row in multi_rows]
     multi_ids = [row["id"] for row in multi_rows]
     multi_metas = [
-        {"head": row["head"], "label": row["label"], "source_split": row["source_split"]}
+        {"label": row["label"], "source_split": row["source_split"]}
         for row in multi_rows
     ]
     _embed_and_write_collection(
