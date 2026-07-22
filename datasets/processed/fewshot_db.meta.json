@@ -14,7 +14,10 @@
     }
   },
   "embedding_model": "FremyCompany/BioLORD-2023",
+  "eval_holdout_size": 450,
+  "fewshot_pool_size_after_holdout": 36554,
   "multiclass_raw_pool_size": 37004,
-  "rebuild": true,
+  "rebuild": false,
+  "rows_dropped_eval_holdout": 450,
   "seed": 1337
 }

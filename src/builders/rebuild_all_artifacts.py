@@ -15,6 +15,8 @@ Important:
 - Few-shot examples are taken from the raw multiclass dataset, but they are
   passed through the same cleaning / filtering pipeline used by the processed
   evaluation datasets before they are sampled and embedded.
+- Eval posts (and therefore the nested dev slice) are held out of the few-shot
+  pool so retrieved examples cannot leak into evaluation.
 
 Run:
     python src/builders/rebuild_all_artifacts.py
@@ -50,14 +52,39 @@ from components.config import (  # noqa: E402
     FEWSHOT_MULTICLASS_EXAMPLES_PATH,
     FEWSHOT_MULTICLASS_MAX_PER_LABEL,
     RAG_EVAL_LABELS,
+    RAG_EVAL_SUBSET_PATH,
 )
 import build_multiclass_dataset as multiclass_builder  # noqa: E402
 
 
-def _build_multiclass_fewshot_pool() -> pd.DataFrame:
+def _eval_holdout_keys() -> set[str]:
+    """Lowercased texts from the committed eval split (dev is nested inside it)."""
+    if not RAG_EVAL_SUBSET_PATH.exists():
+        raise FileNotFoundError(
+            f"Eval CSV required to hold out leakage from few-shot pool: {RAG_EVAL_SUBSET_PATH}. "
+            "Run without --skip-evals first, or build with: python src/builders/build_multiclass_dataset.py"
+        )
+    eval_df = pd.read_csv(RAG_EVAL_SUBSET_PATH)
+    return set(eval_df["text"].astype(str).str.strip().str.lower())
+
+
+def _build_multiclass_fewshot_pool() -> tuple[pd.DataFrame, dict]:
     raw, _ = multiclass_builder.load_raw_frames()
     cleaned, _ = multiclass_builder.filter_and_clean(raw)
-    return cleaned.reset_index(drop=True)
+    holdout = _eval_holdout_keys()
+    before = len(cleaned)
+    pool = cleaned[~cleaned["text"].astype(str).str.strip().str.lower().isin(holdout)].copy()
+    stats = {
+        "cleaned_pool_size": int(before),
+        "eval_holdout_size": int(len(holdout)),
+        "fewshot_pool_size": int(len(pool)),
+        "rows_dropped_eval_holdout": int(before - len(pool)),
+    }
+    print(
+        f"Few-shot pool after eval holdout: {stats['fewshot_pool_size']} "
+        f"(dropped {stats['rows_dropped_eval_holdout']} eval texts)"
+    )
+    return pool.reset_index(drop=True), stats
 
 
 def _sample_balanced(df: pd.DataFrame, *, labels: list[str], per_label: int, seed: int) -> pd.DataFrame:
@@ -171,9 +198,9 @@ def _embed_and_write_collection(
 
 def build_fewshot_db(*, rebuild: bool, seed: int) -> dict:
     # Build pool from raw multiclass data using the same cleaning/filter pipeline
-    # as the processed eval/dev builder for consistency.
+    # as the processed eval/dev builder, then hold out eval texts to prevent leakage.
     print("\nBuilding few-shot pool from raw multiclass data via the shared preprocessing pipeline …")
-    multi_pool = _build_multiclass_fewshot_pool()
+    multi_pool, pool_stats = _build_multiclass_fewshot_pool()
 
     # Sample balanced caps for deterministic size.
     multi_sample = _sample_balanced(
@@ -230,7 +257,10 @@ def build_fewshot_db(*, rebuild: bool, seed: int) -> dict:
                 "total_vectors": int(len(multi_texts)),
             },
         },
-        "multiclass_raw_pool_size": int(len(multi_pool)),
+        "multiclass_raw_pool_size": pool_stats["cleaned_pool_size"],
+        "eval_holdout_size": pool_stats["eval_holdout_size"],
+        "fewshot_pool_size_after_holdout": pool_stats["fewshot_pool_size"],
+        "rows_dropped_eval_holdout": pool_stats["rows_dropped_eval_holdout"],
         "rebuild": rebuild,
     }
     FEWSHOT_DB_META_PATH.write_text(
