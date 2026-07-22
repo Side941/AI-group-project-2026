@@ -308,7 +308,7 @@ footer{
   <div class="stamp">
     <div class="row"><span class="k">PROJECT</span><span class="v" contenteditable="true">AI-group-project-2026</span></div>
     <div class="row"><span class="k">SYSTEM</span><span class="v" contenteditable="true">ICD-11 Multiclass RAG Classifier</span></div>
-    <div class="row"><span class="k">REV</span><span class="v" contenteditable="true">0.3 — shared preprocessing + few-shot store</span></div>
+    <div class="row"><span class="k">REV</span><span class="v" contenteditable="true">0.4 — multiclass-only + active few-shot store</span></div>
     <div class="row"><span class="k">DATE</span><span class="v" contenteditable="true" id="stamp-date"></span></div>
   </div>
 </footer>
@@ -329,9 +329,9 @@ const nodes = {
 
   icd11kb:  {id:'icd11kb', layer:'layer-stores', type:'active', title:'ICD-11 Knowledge Base', desc:'Chunked ICD-11 clinical criteria, section-filtered', fixed:true},
   suicidekb:{id:'suicidekb', layer:'layer-stores', type:'planned', title:'Suicide Knowledge Base', desc:'New store for suicide-specific clinical material — ICD-11 alone under-covers this', fixed:true, toggle:true},
-  fewshot:  {id:'fewshot', layer:'layer-stores', type:'planned', title:'Few-shot Example Store', desc:'Example (text, label) pairs sampled from the multiclass raw dataset after the same shared preprocessing pipeline used by the eval/dev datasets, then indexed for few-shot retrieval.', fixed:true, toggle:true},
+  fewshot:  {id:'fewshot', layer:'layer-stores', type:'active', title:'Few-shot Example Store', desc:'Labeled multiclass examples (suicidal / depression / normal) sampled from the raw HF corpus after the same shared cleaning, length filter, and dedupe pipeline as eval/dev — exported as JSON and indexed in Chroma for BM25 / dense / hybrid few-shot retrieval.', fixed:true},
 
-  assembly: {id:'assembly', layer:'layer-assembly', type:'active', title:'Context Assembly', desc:'Merges retrieved KB passages + retrieved few-shot examples into the prompt. Few-shot retrieval is planned but the store now shares the same preprocessing path as the main datasets.', fixed:true},
+  assembly: {id:'assembly', layer:'layer-assembly', type:'active', title:'Context Assembly', desc:'Merges retrieved ICD-11 passages with optional retrieved few-shot examples into the prompt. Notebooks still use static templates; dynamic few-shot retrieval is available via experiments/exp_fewshot_rag.py.', fixed:true},
 
   qwen06:   {id:'qwen06', layer:'layer-llm', type:'active', title:'Qwen3 – 0.6B', desc:'Lighter, faster inference pass — prompted only, no fine-tuning', fixed:true, primary:true},
   qwen17:   {id:'qwen17', layer:'layer-llm', type:'active', title:'Qwen3 – 1.7B', desc:'Larger model, higher-quality reasoning — prompted only, no fine-tuning', fixed:true, primary:false},
@@ -341,6 +341,7 @@ const nodes = {
 
 let edges = [
   ['mcdataset','dense'],['mcdataset','bm25'],['mcdataset','hybrid'],
+  ['mcdataset','fewshot'],
   ['dense','icd11kb'],['dense','suicidekb'],
   ['bm25','icd11kb'],['bm25','suicidekb'],
   ['hybrid','icd11kb'],['hybrid','suicidekb'],
