@@ -7,7 +7,7 @@ Requires a running Ollama server with the chosen model pulled, e.g.:
     ollama pull qwen3:0.6b
 
     python experiments/smoke_rag_oneshot.py
-    python experiments/smoke_rag_oneshot.py --head binary --query suicidal
+    python experiments/smoke_rag_oneshot.py --query suicidal
     python experiments/smoke_rag_oneshot.py --retriever bm25 --model qwen3:0.6b
 """
 
@@ -28,18 +28,10 @@ from components.config import CHROMA_PATH, RETRIEVAL_SECTIONS  # noqa: E402
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
-MULTICLASS_SYSTEM = (
+SYSTEM_PROMPT = (
     "You are a mental-health risk classifier for social-media posts. "
     "You must reply with ONLY these two lines, nothing else:\n"
     "Label: <suicidal|depression|normal>\n"
-    "Reason: <one sentence>\n"
-    "Do NOT give advice. Do NOT explain. Just the two lines above."
-)
-
-BINARY_SYSTEM = (
-    "You are a mental-health risk classifier for social-media posts. "
-    "You must reply with ONLY these two lines, nothing else:\n"
-    "Label: <suicide|non-suicide>\n"
     "Reason: <one sentence>\n"
     "Do NOT give advice. Do NOT explain. Just the two lines above."
 )
@@ -57,7 +49,6 @@ Answer:"""
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="One-shot RAG classification smoke.")
-    parser.add_argument("--head", choices=("multiclass", "binary"), default="multiclass")
     parser.add_argument("--query", choices=sorted(SAMPLE_QUERIES), default="depression")
     parser.add_argument("--retriever", choices=("bm25", "dense", "hybrid"), default="bm25")
     parser.add_argument("--model", default="qwen3:0.6b")
@@ -139,15 +130,10 @@ def call_ollama(prompt: str, *, model: str, timeout: int) -> str:
 def main() -> int:
     args = build_parser().parse_args()
     post = SAMPLE_QUERIES[args.query]
-    labels = (
-        ["suicidal", "depression", "normal"]
-        if args.head == "multiclass"
-        else ["suicide", "non-suicide"]
-    )
-    system = MULTICLASS_SYSTEM if args.head == "multiclass" else BINARY_SYSTEM
+    labels = ["suicidal", "depression", "normal"]
 
     print("=== One-shot RAG smoke ===")
-    print(f"head={args.head}  retriever={args.retriever}  model={args.model}")
+    print(f"retriever={args.retriever}  model={args.model}")
     print(f"post: {post}\n")
 
     retriever = build_retriever(args.retriever, alpha=args.alpha)
@@ -156,7 +142,7 @@ def main() -> int:
     print_hits(hits)
 
     prompt = PROMPT_TEMPLATE.format(
-        system=system,
+        system=SYSTEM_PROMPT,
         chunks=format_chunks(hits),
         post=post,
     )

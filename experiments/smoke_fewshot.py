@@ -7,7 +7,7 @@ This store is not yet wired into RAG prompts; this script only checks that
 BM25 / dense / hybrid retrieval over the examples works.
 
     python experiments/smoke_fewshot.py
-    python experiments/smoke_fewshot.py --head binary --k 3
+    python experiments/smoke_fewshot.py --k 3
     python experiments/smoke_fewshot.py --skip-dense
 """
 
@@ -20,7 +20,6 @@ from _common import SAMPLE_QUERIES, bootstrap, print_hits
 bootstrap()
 
 from components.config import (  # noqa: E402
-    FEWSHOT_BINARY_EXAMPLES_PATH,
     FEWSHOT_CHROMA_PATH,
     FEWSHOT_MULTICLASS_EXAMPLES_PATH,
 )
@@ -33,7 +32,6 @@ from fewshot_retrievers import (  # noqa: E402
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Smoke-test few-shot retrievers.")
-    parser.add_argument("--head", choices=("multiclass", "binary"), default="multiclass")
     parser.add_argument(
         "--query",
         choices=sorted(SAMPLE_QUERIES),
@@ -48,14 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     query = SAMPLE_QUERIES[args.query]
-    examples_path = (
-        FEWSHOT_MULTICLASS_EXAMPLES_PATH
-        if args.head == "multiclass"
-        else FEWSHOT_BINARY_EXAMPLES_PATH
-    )
+    examples_path = FEWSHOT_MULTICLASS_EXAMPLES_PATH
+    head = "multiclass"
 
     print("=== Few-shot retrieval smoke ===")
-    print(f"head={args.head}  query={args.query}  k={args.k}")
+    print(f"head={head}  query={args.query}  k={args.k}")
     print(f"examples: {examples_path}")
     print(f"chroma:   {FEWSHOT_CHROMA_PATH}\n")
 
@@ -64,7 +59,7 @@ def main() -> int:
         print("Build with: python src/builders/rebuild_all_artifacts.py")
         return 1
 
-    bm25 = FewShotBM25Retriever(head=args.head)
+    bm25 = FewShotBM25Retriever(head=head)
     print("--- Few-shot BM25 ---")
     print_hits(bm25.search(query, k=args.k), score_key="bm25_score")
 
@@ -78,7 +73,7 @@ def main() -> int:
         return 1
 
     initialise_fewshot_dense_retrieval()
-    retrievers = build_fewshot_retrievers(head=args.head, alpha=args.alpha)
+    retrievers = build_fewshot_retrievers(head=head, alpha=args.alpha)
 
     print("\n--- Few-shot Dense ---")
     print_hits(retrievers["dense"].search(query, k=args.k), score_key="dense_score")

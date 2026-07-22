@@ -18,7 +18,6 @@ from rank_bm25 import BM25Okapi
 from components.config import (
     EMBEDDING_MODEL,
     FEWSHOT_CHROMA_PATH,
-    FEWSHOT_COLLECTION_BINARY,
     FEWSHOT_COLLECTION_MULTICLASS,
 )
 try:
@@ -50,7 +49,6 @@ def initialise_fewshot_dense_retrieval(
     client = chromadb.PersistentClient(path=str(chroma_path))
     _fewshot_collections = {
         "multiclass": client.get_collection(FEWSHOT_COLLECTION_MULTICLASS),
-        "binary": client.get_collection(FEWSHOT_COLLECTION_BINARY),
     }
     print(
         "Few-shot collections ready:",
@@ -103,8 +101,8 @@ class FewShotBM25Retriever:
 
 class FewShotDenseRetriever:
     def __init__(self, *, head: str):
-        if head not in {"multiclass", "binary"}:
-            raise ValueError(f"Unsupported head: {head}")
+        if head != "multiclass":
+            raise ValueError(f"Unsupported head: {head} (only 'multiclass' is available)")
         self.head = head
 
     def search(self, query: str, k: int = 5) -> list[dict]:

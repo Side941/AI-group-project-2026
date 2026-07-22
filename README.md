@@ -15,7 +15,6 @@ Prompted RAG classifiers over ICD-11 clinical criteria (Qwen via Ollama). The re
 | KB build | `src/builders/run_kb_pipeline.py` | `notebooks/01_kb_pipeline_demo.ipynb` | `knowledge_base/icd_11/chroma_db/` |
 | Multiclass dataset prep | `src/builders/build_multiclass_dataset.py` | `notebooks/02_multiclass_dataset_prep.ipynb` | `datasets/processed/multiclass_*.csv` |
 | Multiclass RAG eval | notebook-driven | `notebooks/03_multiclass_rag.ipynb` | `results/multiclass_*.csv` |
-| Binary dataset prep | `src/builders/build_binary_dataset.py` | `notebooks/04_binary_rag.ipynb` | `datasets/processed/binary_suicide_*.csv` |
 | Rebuild everything + few-shot DB | `src/builders/rebuild_all_artifacts.py` | none | processed CSVs + `knowledge_base/fewshot/` |
 
 ## Project structure
@@ -34,8 +33,7 @@ AI-group-project-2026/
 ├── notebooks/                   # Human-facing walkthroughs / experiments
 │   ├── 01_kb_pipeline_demo.ipynb
 │   ├── 02_multiclass_dataset_prep.ipynb
-│   ├── 03_multiclass_rag.ipynb
-│   └── 04_binary_rag.ipynb
+│   └── 03_multiclass_rag.ipynb
 ├── experiments/                 # Small pipeline smoke tests (.py)
 ├── results/                     # Notebook experiment output CSVs
 ├── src/
@@ -64,7 +62,6 @@ Also needed locally:
 | `knowledge_base/icd_11/icd_11.pdf` | Source PDF for chunking |
 | `knowledge_base/icd_11/icd11_chunks.json` | Chunked ICD-11 criteria |
 | `knowledge_base/icd_11/chroma_db/` | Dense ICD-11 vector store |
-| `datasets/raw/suicide_detection_raw.csv` | Binary source dataset |
 | Ollama + `qwen3:0.6b` / `qwen3:1.7b` | LLM inference for notebooks |
 
 The multiclass raw caches under `datasets/raw/` are created automatically if missing.
@@ -90,25 +87,6 @@ Build or rebuild:
 
 ```bash
 python src/builders/build_multiclass_dataset.py
-```
-
-### Binary suicide
-
-Raw input:
-- `datasets/raw/suicide_detection_raw.csv`
-
-Processed outputs:
-- `datasets/processed/binary_suicide_eval.csv` — 300 posts (150/class)
-- `datasets/processed/binary_suicide_dev.csv` — 20 posts (10/class)
-- `datasets/processed/binary_suicide_eval.meta.json`
-- `datasets/processed/binary_suicide_dev.meta.json`
-
-Labels: `suicide`, `non-suicide`
-
-Build or rebuild:
-
-```bash
-python src/builders/build_binary_dataset.py
 ```
 
 ## Running
@@ -172,13 +150,12 @@ Run the first path-setup cell before anything else:
 - `notebooks/01_kb_pipeline_demo.ipynb`
 - `notebooks/02_multiclass_dataset_prep.ipynb`
 - `notebooks/03_multiclass_rag.ipynb`
-- `notebooks/04_binary_rag.ipynb`
 
 Current experiment outputs are written under `results/`.
 
 ## Notes
 
 - Retrievers: `bm25`, `dense`, `hybrid` (weighted RRF).
-- Both classifiers currently retrieve only from the ICD-11 KB in the notebooks.
+- The multiclass classifier currently retrieves only from the ICD-11 KB in the notebook.
 - The few-shot vector DB can be exercised via `experiments/exp_fewshot_rag.py` (dynamic retrieved examples in the prompt); notebooks still use static few-shot templates.
 - CPU is the default fallback; GPU is used when available for embeddings.

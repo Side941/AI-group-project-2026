@@ -1,20 +1,19 @@
 """
 rebuild_all_artifacts.py
 ========================
-Rebuild both processed evaluation datasets (multiclass + binary) and build a
-few-shot Chroma vector store from the raw datasets.
+Rebuild the processed multiclass evaluation dataset and build a few-shot
+Chroma vector store from the raw multiclass dataset.
 
 Blueprint alignment:
 - Multiclass head uses the HF mental-health dataset.
-- Binary head uses `datasets/raw/suicide_detection_raw.csv`.
 - Few-shot vector DB stores (example_text, label) pairs that can later be
   retrieved to assemble dynamic few-shot prompts.
 
 Important:
 - We build the vector DB, but we do NOT wire retrieval from it into the
   classification pipeline yet.
-- Few-shot examples are taken from the raw datasets, but they are passed
-  through the same cleaning / filtering pipeline used by the processed
+- Few-shot examples are taken from the raw multiclass dataset, but they are
+  passed through the same cleaning / filtering pipeline used by the processed
   evaluation datasets before they are sampled and embedded.
 
 Run:
@@ -41,34 +40,23 @@ for _path in (_SRC, _SRC / "retriever", _BUILDERS_DIR):
         sys.path.insert(0, _s)
 
 from components.config import (  # noqa: E402
-    BINARY_LABELS,
     EMBEDDING_MODEL,
-    FEWSHOT_BINARY_EXAMPLES_PATH,
     FEWSHOT_BUILD_SEED,
     FEWSHOT_CHROMA_PATH,
-    FEWSHOT_COLLECTION_BINARY,
     FEWSHOT_COLLECTION_MULTICLASS,
     FEWSHOT_DB_META_PATH,
     FEWSHOT_EMBED_BATCH_SIZE,
     FEWSHOT_EMBEDDING_MAX_SEQ_LENGTH,
-    FEWSHOT_BINARY_MAX_PER_CLASS,
     FEWSHOT_MULTICLASS_EXAMPLES_PATH,
     FEWSHOT_MULTICLASS_MAX_PER_LABEL,
     RAG_EVAL_LABELS,
 )
-import build_binary_dataset as binary_builder  # noqa: E402
 import build_multiclass_dataset as multiclass_builder  # noqa: E402
 
 
 def _build_multiclass_fewshot_pool() -> pd.DataFrame:
     raw, _ = multiclass_builder.load_raw_frames()
     cleaned, _ = multiclass_builder.filter_and_clean(raw)
-    return cleaned.reset_index(drop=True)
-
-
-def _build_binary_fewshot_pool() -> pd.DataFrame:
-    raw, _ = binary_builder.load_raw_frame()
-    cleaned, _ = binary_builder.filter_and_clean(raw)
     return cleaned.reset_index(drop=True)
 
 
@@ -133,7 +121,6 @@ def _embed_and_write_collection(
     from sentence_transformers import SentenceTransformer
     from tqdm import tqdm
 
-    global _EMBEDDER
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"\nEmbedding for collection '{collection_name}' on device: {device}")
 
@@ -186,23 +173,16 @@ def _embed_and_write_collection(
 
 
 def build_fewshot_db(*, rebuild: bool, seed: int) -> dict:
-    # Build pools from raw datasets using the same cleaning/filter pipeline
-    # as the processed eval/dev builders for consistency.
-    print("\nBuilding few-shot pools from raw datasets via the shared preprocessing pipeline …")
+    # Build pool from raw multiclass data using the same cleaning/filter pipeline
+    # as the processed eval/dev builder for consistency.
+    print("\nBuilding few-shot pool from raw multiclass data via the shared preprocessing pipeline …")
     multi_pool = _build_multiclass_fewshot_pool()
-    bin_pool = _build_binary_fewshot_pool()
 
     # Sample balanced caps for deterministic size.
     multi_sample = _sample_balanced(
         multi_pool,
         labels=list(RAG_EVAL_LABELS),
         per_label=FEWSHOT_MULTICLASS_MAX_PER_LABEL,
-        seed=seed,
-    )
-    bin_sample = _sample_balanced(
-        bin_pool,
-        labels=list(BINARY_LABELS),
-        per_label=FEWSHOT_BINARY_MAX_PER_CLASS,
         seed=seed,
     )
 
@@ -212,7 +192,12 @@ def build_fewshot_db(*, rebuild: bool, seed: int) -> dict:
 
     chroma_client = chromadb.PersistentClient(path=str(FEWSHOT_CHROMA_PATH))
 
-    # Multiclass collection
+    # Drop legacy binary collection if present from older rebuilds.
+    existing = [c.name for c in chroma_client.list_collections()]
+    if "fewshot_binary" in existing:
+        chroma_client.delete_collection("fewshot_binary")
+        print("Removed legacy few-shot collection 'fewshot_binary'.")
+
     multi_rows = _export_examples_json(
         multi_sample,
         head="multiclass",
@@ -236,30 +221,6 @@ def build_fewshot_db(*, rebuild: bool, seed: int) -> dict:
         rebuild=rebuild,
     )
 
-    # Binary collection
-    bin_rows = _export_examples_json(
-        bin_sample,
-        head="binary",
-        path=FEWSHOT_BINARY_EXAMPLES_PATH,
-        id_prefix="bin",
-    )
-    bin_texts = [row["post"] for row in bin_rows]
-    bin_labels = [row["label"] for row in bin_rows]
-    bin_ids = [row["id"] for row in bin_rows]
-    bin_metas = [
-        {"head": row["head"], "label": row["label"], "source_split": row["source_split"]}
-        for row in bin_rows
-    ]
-    _embed_and_write_collection(
-        chroma_client=chroma_client,
-        collection_name=FEWSHOT_COLLECTION_BINARY,
-        texts=bin_texts,
-        labels=bin_labels,
-        metadatas=bin_metas,
-        ids=bin_ids,
-        rebuild=rebuild,
-    )
-
     meta = {
         "artifact": "fewshot_db",
         "seed": seed,
@@ -272,16 +233,8 @@ def build_fewshot_db(*, rebuild: bool, seed: int) -> dict:
                 "labels": list(RAG_EVAL_LABELS),
                 "total_vectors": int(len(multi_texts)),
             },
-            "binary": {
-                "collection_name": FEWSHOT_COLLECTION_BINARY,
-                "examples_json": str(FEWSHOT_BINARY_EXAMPLES_PATH),
-                "per_class": FEWSHOT_BINARY_MAX_PER_CLASS,
-                "labels": list(BINARY_LABELS),
-                "total_vectors": int(len(bin_texts)),
-            },
         },
         "multiclass_raw_pool_size": int(len(multi_pool)),
-        "binary_raw_pool_size": int(len(bin_pool)),
         "rebuild": rebuild,
     }
     FEWSHOT_DB_META_PATH.write_text(
@@ -313,15 +266,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # CLI seed currently only affects few-shot sampling because the two eval/dev
-    # builders hardcode their own seeds via config constants. If you want them
+    # CLI seed currently only affects few-shot sampling because the eval/dev
+    # builder hardcodes its own seeds via config constants. If you want them
     # to follow a different seed, edit config and re-run.
     print("=== Rebuild eval/dev ===")
     if args.skip_evals:
         print("Skipping eval/dev rebuild.")
     else:
         runpy.run_path(str(_BUILDERS_DIR / "build_multiclass_dataset.py"), run_name="__main__")
-        runpy.run_path(str(_BUILDERS_DIR / "build_binary_dataset.py"), run_name="__main__")
 
     # Always build few-shot DB (this is the main request).
     print("=== Build few-shot vector DB ===")
@@ -332,4 +284,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

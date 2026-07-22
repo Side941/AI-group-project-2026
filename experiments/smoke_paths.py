@@ -13,12 +13,8 @@ from _common import bootstrap
 bootstrap()
 
 from components.config import (  # noqa: E402
-    BINARY_DEV_PATH,
-    BINARY_EVAL_PATH,
-    BINARY_SOURCE_PATH,
     CHROMA_PATH,
     CHUNKS_PATH,
-    FEWSHOT_BINARY_EXAMPLES_PATH,
     FEWSHOT_CHROMA_PATH,
     FEWSHOT_MULTICLASS_EXAMPLES_PATH,
     MULTICLASS_DEV_PATH,
@@ -47,13 +43,9 @@ def main() -> int:
     print("\nProcessed datasets")
     required_ok &= check("Multiclass eval", MULTICLASS_EVAL_PATH)
     required_ok &= check("Multiclass dev", MULTICLASS_DEV_PATH)
-    required_ok &= check("Binary eval", BINARY_EVAL_PATH)
-    required_ok &= check("Binary dev", BINARY_DEV_PATH)
 
     print("\nRaw / few-shot (optional for retrieval smokes)")
-    check("Binary raw source", BINARY_SOURCE_PATH, required=False)
     check("Few-shot multiclass JSON", FEWSHOT_MULTICLASS_EXAMPLES_PATH, required=False)
-    check("Few-shot binary JSON", FEWSHOT_BINARY_EXAMPLES_PATH, required=False)
     check("Few-shot ChromaDB", FEWSHOT_CHROMA_PATH, required=False)
 
     print()

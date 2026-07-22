@@ -307,7 +307,7 @@ footer{
 <footer>
   <div class="stamp">
     <div class="row"><span class="k">PROJECT</span><span class="v" contenteditable="true">AI-group-project-2026</span></div>
-    <div class="row"><span class="k">SYSTEM</span><span class="v" contenteditable="true">ICD-11 + Suicide RAG Classifier</span></div>
+    <div class="row"><span class="k">SYSTEM</span><span class="v" contenteditable="true">ICD-11 Multiclass RAG Classifier</span></div>
     <div class="row"><span class="k">REV</span><span class="v" contenteditable="true">0.3 — shared preprocessing + few-shot store</span></div>
     <div class="row"><span class="k">DATE</span><span class="v" contenteditable="true" id="stamp-date"></span></div>
   </div>
@@ -322,7 +322,6 @@ const nextId = () => 'n' + (uid++);
 
 const nodes = {
   mcdataset:  {id:'mcdataset', layer:'layer-query', type:'active', title:'Multiclass Dataset', desc:'Processed social-media posts — 3 labels: suicidal / depressed / normal. Built from raw posts after the shared cleaning, length filtering, dedupe, and sampling pipeline.', fixed:true},
-  bindataset: {id:'bindataset', layer:'layer-query', type:'planned', title:'Binary Dataset', desc:'Processed social-media posts for suicide vs. not-suicide, built from raw posts through the same shared preprocessing pipeline as the multiclass head.', fixed:true, toggle:true},
 
   dense:    {id:'dense', layer:'layer-retrievers', type:'active', title:'Dense Retriever', desc:'Embedding similarity search over indexed chunks (ChromaDB, BioLORD-2023)', fixed:true},
   bm25:     {id:'bm25', layer:'layer-retrievers', type:'active', title:'BM25 Retriever', desc:'Sparse keyword / term-frequency search', fixed:true},
@@ -330,7 +329,7 @@ const nodes = {
 
   icd11kb:  {id:'icd11kb', layer:'layer-stores', type:'active', title:'ICD-11 Knowledge Base', desc:'Chunked ICD-11 clinical criteria, section-filtered', fixed:true},
   suicidekb:{id:'suicidekb', layer:'layer-stores', type:'planned', title:'Suicide Knowledge Base', desc:'New store for suicide-specific clinical material — ICD-11 alone under-covers this', fixed:true, toggle:true},
-  fewshot:  {id:'fewshot', layer:'layer-stores', type:'planned', title:'Few-shot Example Store', desc:'Example (text, label) pairs sampled from the raw datasets after the same shared preprocessing pipeline used by the eval/dev datasets, then indexed for few-shot retrieval.', fixed:true, toggle:true},
+  fewshot:  {id:'fewshot', layer:'layer-stores', type:'planned', title:'Few-shot Example Store', desc:'Example (text, label) pairs sampled from the multiclass raw dataset after the same shared preprocessing pipeline used by the eval/dev datasets, then indexed for few-shot retrieval.', fixed:true, toggle:true},
 
   assembly: {id:'assembly', layer:'layer-assembly', type:'active', title:'Context Assembly', desc:'Merges retrieved KB passages + retrieved few-shot examples into the prompt. Few-shot retrieval is planned but the store now shares the same preprocessing path as the main datasets.', fixed:true},
 
@@ -342,7 +341,6 @@ const nodes = {
 
 let edges = [
   ['mcdataset','dense'],['mcdataset','bm25'],['mcdataset','hybrid'],
-  ['bindataset','dense'],['bindataset','bm25'],['bindataset','hybrid'],
   ['dense','icd11kb'],['dense','suicidekb'],
   ['bm25','icd11kb'],['bm25','suicidekb'],
   ['hybrid','icd11kb'],['hybrid','suicidekb'],

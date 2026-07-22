@@ -19,9 +19,6 @@ Unlike the notebooks (which use static few-shot templates), this script:
 
     # Compare prompt variants side-by-side
     python experiments/exp_fewshot_rag.py --compare --query suicidal
-
-    # Binary head
-    python experiments/exp_fewshot_rag.py --head binary --query suicidal
 """
 
 from __future__ import annotations
@@ -39,7 +36,6 @@ bootstrap()
 from bm25_retriever import BM25Retriever  # noqa: E402
 from components.config import (  # noqa: E402
     CHROMA_PATH,
-    FEWSHOT_BINARY_EXAMPLES_PATH,
     FEWSHOT_CHROMA_PATH,
     FEWSHOT_MULTICLASS_EXAMPLES_PATH,
     RETRIEVAL_SECTIONS,
@@ -52,7 +48,7 @@ from fewshot_retrievers import (  # noqa: E402
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
-MULTICLASS_SYSTEM = (
+SYSTEM_PROMPT = (
     "You are a mental-health risk classifier for social-media posts. "
     "You must reply with ONLY these two lines, nothing else:\n"
     "Label: <suicidal|depression|normal>\n"
@@ -60,13 +56,7 @@ MULTICLASS_SYSTEM = (
     "Do NOT give advice. Do NOT explain. Just the two lines above."
 )
 
-BINARY_SYSTEM = (
-    "You are a mental-health risk classifier for social-media posts. "
-    "You must reply with ONLY these two lines, nothing else:\n"
-    "Label: <suicide|non-suicide>\n"
-    "Reason: <one sentence>\n"
-    "Do NOT give advice. Do NOT explain. Just the two lines above."
-)
+LABELS = ["suicidal", "depression", "normal"]
 
 PROMPT_TEMPLATE = """\
 {system}
@@ -80,7 +70,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="RAG experiment with retrieved few-shot examples.",
     )
-    parser.add_argument("--head", choices=("multiclass", "binary"), default="multiclass")
     parser.add_argument("--query", choices=sorted(SAMPLE_QUERIES), default="depression")
     parser.add_argument(
         "--fewshot-retriever",
@@ -112,16 +101,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def labels_for(head: str) -> list[str]:
-    if head == "binary":
-        return ["suicide", "non-suicide"]
-    return ["suicidal", "depression", "normal"]
-
-
-def system_for(head: str) -> str:
-    return BINARY_SYSTEM if head == "binary" else MULTICLASS_SYSTEM
-
-
 def build_kb_retriever(name: str, *, alpha: float):
     if name == "none":
         return None
@@ -143,12 +122,8 @@ def build_kb_retriever(name: str, *, alpha: float):
     return HybridRetriever(chunks=mood_chunks, sections=sections, alpha=alpha)
 
 
-def build_fewshot_retriever(name: str, *, head: str, alpha: float):
-    examples_path = (
-        FEWSHOT_MULTICLASS_EXAMPLES_PATH
-        if head == "multiclass"
-        else FEWSHOT_BINARY_EXAMPLES_PATH
-    )
+def build_fewshot_retriever(name: str, *, alpha: float):
+    examples_path = FEWSHOT_MULTICLASS_EXAMPLES_PATH
     if not examples_path.exists():
         raise FileNotFoundError(
             f"Few-shot examples missing at {examples_path}. "
@@ -156,13 +131,13 @@ def build_fewshot_retriever(name: str, *, head: str, alpha: float):
         )
 
     if name == "bm25":
-        return FewShotBM25Retriever(head=head)
+        return FewShotBM25Retriever(head="multiclass")
 
     if not FEWSHOT_CHROMA_PATH.exists():
         raise FileNotFoundError(f"Few-shot Chroma missing at {FEWSHOT_CHROMA_PATH}")
 
     initialise_fewshot_dense_retrieval()
-    return build_fewshot_retrievers(head=head, alpha=alpha)[name]
+    return build_fewshot_retrievers(head="multiclass", alpha=alpha)[name]
 
 
 def format_kb_block(hits: list[dict]) -> str:
@@ -294,19 +269,15 @@ def run_variant(
 def main() -> int:
     args = build_parser().parse_args()
     post = SAMPLE_QUERIES[args.query]
-    labels = labels_for(args.head)
-    system = system_for(args.head)
 
     print("=== Few-shot retrieval RAG experiment ===")
-    print(f"head={args.head}  query={args.query}")
+    print(f"query={args.query}")
     print(f"fewshot={args.fewshot_retriever}  n_examples={args.n_examples}")
     print(f"kb={args.kb_retriever}  k_kb={args.k_kb}")
     print(f"model={args.model}  dry_run={args.dry_run}  compare={args.compare}")
     print(f"\nPost: {post}")
 
-    fs_retriever = build_fewshot_retriever(
-        args.fewshot_retriever, head=args.head, alpha=args.alpha
-    )
+    fs_retriever = build_fewshot_retriever(args.fewshot_retriever, alpha=args.alpha)
     examples = fs_retriever.search(post, k=args.n_examples)
 
     kb_retriever = build_kb_retriever(args.kb_retriever, alpha=args.alpha)
@@ -327,8 +298,8 @@ def main() -> int:
             results[name] = run_variant(
                 name=name,
                 post=post,
-                system=system,
-                labels=labels,
+                system=SYSTEM_PROMPT,
+                labels=LABELS,
                 kb_hits=kb,
                 examples=ex,
                 model=args.model,
@@ -353,8 +324,8 @@ def main() -> int:
         if kb_hits
         else "retrieved_fewshot_only",
         post=post,
-        system=system,
-        labels=labels,
+        system=SYSTEM_PROMPT,
+        labels=LABELS,
         kb_hits=kb_hits,
         examples=examples,
         model=args.model,

@@ -14,12 +14,8 @@ notebooks/knowledge_base/chroma_db/
 *.csv
 !datasets/processed/multiclass_eval.csv
 !datasets/processed/multiclass_dev.csv
-!datasets/processed/binary_suicide_eval.csv
-!datasets/processed/binary_suicide_dev.csv
 !datasets/processed/multiclass_eval.meta.json
 !datasets/processed/multiclass_dev.meta.json
-!datasets/processed/binary_suicide_eval.meta.json
-!datasets/processed/binary_suicide_dev.meta.json
 !datasets/processed/fewshot_db.meta.json
 /anaconda_projects
 /.virtual_documents

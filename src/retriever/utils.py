@@ -9,7 +9,6 @@ from nltk.stem import PorterStemmer  # type: ignore
 
 from components.config import (
     CHUNKS_PATH,
-    FEWSHOT_BINARY_EXAMPLES_PATH,
     FEWSHOT_MULTICLASS_EXAMPLES_PATH,
     resolve_path,
 )
@@ -52,14 +51,12 @@ def load_fewshot_examples(
     head: str | None = None,
 ) -> list[dict]:
     """Load few-shot example rows exported by rebuild_all_artifacts.py."""
+    if head is not None and head != "multiclass":
+        raise ValueError(f"Unsupported few-shot head: {head!r} (only 'multiclass' is available)")
     if json_path is None:
-        if head == "binary":
-            path = FEWSHOT_BINARY_EXAMPLES_PATH
-        else:
-            path = FEWSHOT_MULTICLASS_EXAMPLES_PATH
+        path = FEWSHOT_MULTICLASS_EXAMPLES_PATH
     else:
-        default = FEWSHOT_BINARY_EXAMPLES_PATH if head == "binary" else FEWSHOT_MULTICLASS_EXAMPLES_PATH
-        path = resolve_path(json_path, default)
+        path = resolve_path(json_path, FEWSHOT_MULTICLASS_EXAMPLES_PATH)
 
     if not path.exists():
         raise FileNotFoundError(f"Few-shot examples file not found: {path}")
