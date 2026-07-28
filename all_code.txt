@@ -1,0 +1,4107 @@
+===== ./experiments/sequential_ablation.py =====
+"""
+experiments/test_4b_only.py
+============================
+Quick test: Can 4B model work with more output tokens?
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import re
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+sys.path.insert(0, str(PROJECT_ROOT / "src" / "retriever"))
+sys.path.insert(0, str(PROJECT_ROOT / "src" / "components"))
+
+from components.config import (
+    CHUNKS_PATH, CHROMA_PATH,
+    RAG_DEV_SLICE_PATH, RAG_EVAL_SUBSET_PATH,
+    RAG_EVAL_LABELS, RETRIEVAL_SECTIONS,
+    MOOD_DISORDER_PREFIXES, RESULTS_DIR,
+    FEWSHOT_MULTICLASS_EXAMPLES_PATH,
+)
+from bm25_retriever import BM25Retriever
+from utils import load_chunks, filter_chunks_by_sections, filter_chunks_by_disorder_codes
+
+OLLAMA_URL = "http://localhost:11434/api/generate"
+
+SYSTEM_PROMPT = (
+    "You are a mental-health risk classifier for social-media posts. "
+    "You must reply with ONLY these two lines, nothing else:\n"
+    "Label: <suicidal|depression|normal>\n"
+    "Reason: <one sentence>\n"
+    "Do NOT give advice. Do NOT explain. Just the two lines above."
+)
+
+FEWSHOT_TEMPLATE = """\
+{system}
+
+Relevant clinical knowledge:
+{chunks}
+---
+Similar examples:
+{examples}
+---
+Post: {post}
+
+Answer:"""
+
+LABEL_ALIASES = {
+    "suicidal": "suicidal", "suicide": "suicidal", "suicidality": "suicidal",
+    "depression": "depression", "depressed": "depression",
+    "normal": "normal", "none": "normal", "healthy": "normal",
+}
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(description="Test 4B model.")
+    parser.add_argument("--eval-mode", choices=("dev", "final"), default="dev")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--timeout", type=int, default=120)
+    return parser
+
+
+def load_dataset(eval_mode):
+    csv.field_size_limit(10_000_000)
+    path = RAG_EVAL_SUBSET_PATH if eval_mode == "final" else RAG_DEV_SLICE_PATH
+    rows = []
+    with open(path, newline="", encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            text = (r.get("text") or "").strip()
+            label = (r.get("label") or "").strip().lower()
+            if text and label in RAG_EVAL_LABELS:
+                rows.append({"text": text, "label": label})
+    return rows
+
+
+def build_retrievers():
+    all_chunks = load_chunks(str(CHUNKS_PATH))
+    mood_chunks = filter_chunks_by_disorder_codes(all_chunks, MOOD_DISORDER_PREFIXES)
+    mood_chunks = filter_chunks_by_sections(mood_chunks, RETRIEVAL_SECTIONS)
+    
+    from dense_retriever import DenseRetriever, initialise_retrieval
+    initialise_retrieval(chroma_path=str(CHROMA_PATH))
+    
+    return {"dense": DenseRetriever(sections=list(RETRIEVAL_SECTIONS))}
+
+
+def build_fewshot_retriever():
+    if not FEWSHOT_MULTICLASS_EXAMPLES_PATH.exists():
+        return None
+    with open(FEWSHOT_MULTICLASS_EXAMPLES_PATH) as f:
+        examples = json.load(f)
+    chunks = [
+        {"text": ex.get("text", ex.get("post", "")), "label": ex.get("label", ""), "id": f"fs_{i}"}
+        for i, ex in enumerate(examples) if ex.get("text") or ex.get("post")
+    ]
+    return BM25Retriever(chunks=chunks, sections=None)
+
+
+def parse_label(text):
+    if not text.strip():
+        return "unknown"
+    m = re.search(r"label\s*[:\-]\s*([a-z_\- ]+)", text.lower())
+    if m:
+        cand = m.group(1).strip().split()[0].strip(".,;*")
+        if cand in LABEL_ALIASES:
+            return LABEL_ALIASES[cand]
+    first = text.strip().splitlines()[0].lower()
+    for alias, canon in sorted(LABEL_ALIASES.items(), key=lambda x: -len(x[0])):
+        if re.search(rf"\b{re.escape(alias)}\b", first):
+            return canon
+    return "unknown"
+
+
+def call_ollama(prompt, model, args, num_predict=1024):
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {
+            "seed": args.seed,
+            "temperature": 0.0,
+            "num_predict": num_predict,
+            "num_ctx": 8192,
+        },
+    }
+    
+    t0 = time.perf_counter()
+    req = urllib.request.Request(
+        OLLAMA_URL,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    
+    with urllib.request.urlopen(req, timeout=args.timeout) as r:
+        resp = json.loads(r.read().decode())
+    
+    raw = resp.get("response", "").strip()
+    
+    return {
+        "total_s": round(resp.get("total_duration", 0) / 1e9, 3),
+        "answer_text": raw,
+        "eval_count": resp.get("eval_count", 0),
+        "hit_cap": resp.get("eval_count", 0) >= num_predict,
+    }
+
+
+def format_chunks(hits):
+    if not hits:
+        return "(no clinical knowledge retrieved)"
+    lines = []
+    for i, hit in enumerate(hits, start=1):
+        text = hit.get("prompt_text") or hit.get("text") or ""
+        disorder = hit.get("disorder_name", "")
+        section = hit.get("section", "")
+        lines.append(f"[{i}] ({disorder} — {section}): {text}")
+    return "\n".join(lines)
+
+
+def format_examples(examples):
+    if not examples:
+        return ""
+    lines = []
+    for ex in examples:
+        text = ex.get("text", ex.get("post", ""))
+        label = ex.get("label", "")
+        lines.append(f'Post: "{text}"\nLabel: {label}')
+    return "\n\n".join(lines)
+
+
+def main():
+    args = build_parser().parse_args()
+    posts = load_dataset(args.eval_mode)
+    retrievers = build_retrievers()
+    fewshot_ret = build_fewshot_retriever()
+    
+    print("=" * 70)
+    print("4B MODEL TEST: Dense + k=7 + Few-shot + No thinking")
+    print("=" * 70)
+    print(f"Posts: {len(posts)}")
+    print(f"num_predict: 1024 (increased from 512)")
+    print()
+    
+    ret = retrievers["dense"]
+    correct = 0
+    unknown = 0
+    hit_caps = 0
+    
+    for i, row in enumerate(posts):
+        chunks = ret.search(row["text"], k=7, expand=True)
+        fewshot_examples = fewshot_ret.search(row["text"], k=3) if fewshot_ret else []
+        
+        prompt = FEWSHOT_TEMPLATE.format(
+            system=SYSTEM_PROMPT,
+            chunks=format_chunks(chunks),
+            examples=format_examples(fewshot_examples),
+            post=row['text'],
+        )
+        
+        llm_out = call_ollama(prompt, "qwen3:4b", args, num_predict=1024)
+        predicted = parse_label(llm_out["answer_text"])
+        
+        if predicted == row["label"]:
+            correct += 1
+        if predicted == "unknown":
+            unknown += 1
+        if llm_out["hit_cap"]:
+            hit_caps += 1
+        
+        s = "✓" if predicted == row["label"] else "✗"
+        cap_warn = f" ⚠️HIT_CAP({llm_out['eval_count']} tokens)" if llm_out["hit_cap"] else ""
+        raw_preview = llm_out["answer_text"][:80].replace("\n", "\\n") if llm_out["answer_text"] else "(empty)"
+        print(f"  {s} [{i+1:03d}/{len(posts)}] true={row['label']:<10} "
+              f"pred={predicted:<10} ({llm_out['total_s']:.1f}s){cap_warn}")
+        if predicted == "unknown":
+            print(f"      raw: {raw_preview}...")
+    
+    acc = correct / len(posts)
+    print(f"\n  → Accuracy: {acc:.4f} ({correct}/{len(posts)}), "
+          f"unknown={unknown}, hit_caps={hit_caps}")
+    
+    print(f"\n{'='*70}")
+    print(f"RESULT: qwen3:4b = {acc:.4f}")
+    print(f"{'='*70}")
+    
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())===== ./experiments/smoke_retrieval.py =====
+"""
+smoke_retrieval.py
+==================
+Smoke-test ICD-11 BM25 / dense / hybrid retrieval (no LLM).
+
+Matches notebook policy: mood-disorder prefixes + Essential Features /
+Boundary with Normality, then compares expand vs flat for BM25.
+
+    python experiments/smoke_retrieval.py
+    python experiments/smoke_retrieval.py --query suicidal --k 4
+    python experiments/smoke_retrieval.py --skip-dense   # BM25 only (fast)
+"""
+
+from __future__ import annotations
+
+import argparse
+
+from _common import SAMPLE_QUERIES, bootstrap, load_mood_chunks, print_hits
+
+bootstrap()
+
+from bm25_retriever import BM25Retriever  # noqa: E402
+from components.config import CHROMA_PATH, RETRIEVAL_SECTIONS  # noqa: E402
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Smoke-test ICD-11 retrievers.")
+    parser.add_argument(
+        "--query",
+        choices=sorted(SAMPLE_QUERIES),
+        default="depression",
+        help="Which canned social-media query to use.",
+    )
+    parser.add_argument("--k", type=int, default=4)
+    parser.add_argument(
+        "--skip-dense",
+        action="store_true",
+        help="Skip dense/hybrid (avoids loading BioLORD + Chroma).",
+    )
+    parser.add_argument("--alpha", type=float, default=0.3, help="Hybrid BM25 weight.")
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    query = SAMPLE_QUERIES[args.query]
+    sections = list(RETRIEVAL_SECTIONS)
+
+    print("=== ICD-11 retrieval smoke ===")
+    print(f"query key : {args.query}")
+    print(f"query text: {query}")
+    print(f"k={args.k}  sections={sections}\n")
+
+    mood_chunks = load_mood_chunks()
+    print(f"Mood-filtered chunk pool: {len(mood_chunks)}")
+
+    bm25 = BM25Retriever(chunks=mood_chunks, sections=sections)
+    print("\n--- BM25 (expand=True) ---")
+    print_hits(bm25.search(query, k=args.k, expand=True), score_key="bm25_score")
+
+    print("\n--- BM25 (expand=False / flat) ---")
+    print_hits(bm25.search(query, k=args.k, expand=False), score_key="bm25_score")
+
+    if args.skip_dense:
+        print("\nSkipped dense/hybrid (--skip-dense).")
+        print("PASS — BM25 retrieval OK.")
+        return 0
+
+    if not CHROMA_PATH.exists():
+        print(f"\nFAIL — ChromaDB missing at {CHROMA_PATH}")
+        return 1
+
+    from dense_retriever import DenseRetriever, initialise_retrieval
+    from hybrid_retriever import HybridRetriever
+
+    initialise_retrieval(chroma_path=str(CHROMA_PATH))
+    dense = DenseRetriever(sections=sections)
+    hybrid = HybridRetriever(chunks=mood_chunks, sections=sections, alpha=args.alpha)
+
+    print("\n--- Dense ---")
+    print_hits(dense.search(query, k=args.k, expand=True), score_key="dense_score")
+
+    print(f"\n--- Hybrid (alpha={args.alpha}) ---")
+    print_hits(hybrid.search(query, k=args.k, expand=True), score_key="hybrid_score")
+
+    print("\nPASS — BM25 / dense / hybrid retrieval OK.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+===== ./experiments/smoke_rag_oneshot.py =====
+"""
+smoke_rag_oneshot.py
+====================
+One-post end-to-end RAG smoke: retrieve ICD-11 chunks → prompt → Ollama → label.
+
+Requires a running Ollama server with the chosen model pulled, e.g.:
+    ollama pull qwen3:0.6b
+
+    python experiments/smoke_rag_oneshot.py
+    python experiments/smoke_rag_oneshot.py --head binary --query suicidal
+    python experiments/smoke_rag_oneshot.py --retriever bm25 --model qwen3:0.6b
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import urllib.error
+import urllib.request
+
+from _common import SAMPLE_QUERIES, bootstrap, load_mood_chunks, print_hits
+
+bootstrap()
+
+from bm25_retriever import BM25Retriever  # noqa: E402
+from components.config import CHROMA_PATH, RETRIEVAL_SECTIONS  # noqa: E402
+
+OLLAMA_URL = "http://localhost:11434/api/generate"
+
+MULTICLASS_SYSTEM = (
+    "You are a mental-health risk classifier for social-media posts. "
+    "You must reply with ONLY these two lines, nothing else:\n"
+    "Label: <suicidal|depression|normal>\n"
+    "Reason: <one sentence>\n"
+    "Do NOT give advice. Do NOT explain. Just the two lines above."
+)
+
+BINARY_SYSTEM = (
+    "You are a mental-health risk classifier for social-media posts. "
+    "You must reply with ONLY these two lines, nothing else:\n"
+    "Label: <suicide|non-suicide>\n"
+    "Reason: <one sentence>\n"
+    "Do NOT give advice. Do NOT explain. Just the two lines above."
+)
+
+PROMPT_TEMPLATE = """\
+{system}
+
+Relevant clinical knowledge:
+{chunks}
+---
+Post: {post}
+
+Answer:"""
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="One-shot RAG classification smoke.")
+    parser.add_argument("--head", choices=("multiclass", "binary"), default="multiclass")
+    parser.add_argument("--query", choices=sorted(SAMPLE_QUERIES), default="depression")
+    parser.add_argument("--retriever", choices=("bm25", "dense", "hybrid"), default="bm25")
+    parser.add_argument("--model", default="qwen3:0.6b")
+    parser.add_argument("--k", type=int, default=3)
+    parser.add_argument("--alpha", type=float, default=0.3)
+    parser.add_argument("--timeout", type=int, default=120)
+    return parser
+
+
+def build_retriever(name: str, *, alpha: float):
+    sections = list(RETRIEVAL_SECTIONS)
+    mood_chunks = load_mood_chunks()
+
+    if name == "bm25":
+        return BM25Retriever(chunks=mood_chunks, sections=sections)
+
+    if not CHROMA_PATH.exists():
+        raise FileNotFoundError(f"ChromaDB missing at {CHROMA_PATH}")
+
+    from dense_retriever import DenseRetriever, initialise_retrieval
+    from hybrid_retriever import HybridRetriever
+
+    initialise_retrieval(chroma_path=str(CHROMA_PATH))
+    if name == "dense":
+        return DenseRetriever(sections=sections)
+    return HybridRetriever(chunks=mood_chunks, sections=sections, alpha=alpha)
+
+
+def format_chunks(hits: list[dict]) -> str:
+    if not hits:
+        return "(none)"
+    lines = []
+    for i, hit in enumerate(hits, start=1):
+        text = hit.get("prompt_text") or hit.get("text") or ""
+        lines.append(
+            f"[{i}] ({hit.get('disorder_name', '')} — {hit.get('section', '')}): {text}"
+        )
+    return "\n".join(lines)
+
+
+def parse_label(text: str, valid_labels: list[str]) -> str:
+    cleaned = (text or "").strip()
+    match = re.search(r"Label:\s*([A-Za-z0-9_\-]+)", cleaned, flags=re.IGNORECASE)
+    if match:
+        candidate = match.group(1).strip().lower().replace("_", "-")
+        for label in valid_labels:
+            if candidate == label.lower():
+                return label
+    lower = cleaned.lower()
+    for label in valid_labels:
+        if label.lower() in lower:
+            return label
+    return "UNKNOWN"
+
+
+def call_ollama(prompt: str, *, model: str, timeout: int) -> str:
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": 0.0},
+    }
+    req = urllib.request.Request(
+        OLLAMA_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        raise RuntimeError(
+            f"Ollama request failed ({exc}). Is Ollama running and is '{model}' pulled?"
+        ) from exc
+    return body.get("response", "")
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    post = SAMPLE_QUERIES[args.query]
+    labels = (
+        ["suicidal", "depression", "normal"]
+        if args.head == "multiclass"
+        else ["suicide", "non-suicide"]
+    )
+    system = MULTICLASS_SYSTEM if args.head == "multiclass" else BINARY_SYSTEM
+
+    print("=== One-shot RAG smoke ===")
+    print(f"head={args.head}  retriever={args.retriever}  model={args.model}")
+    print(f"post: {post}\n")
+
+    retriever = build_retriever(args.retriever, alpha=args.alpha)
+    hits = retriever.search(post, k=args.k, expand=True)
+    print(f"--- Retrieved ({args.retriever}, k={args.k}) ---")
+    print_hits(hits)
+
+    prompt = PROMPT_TEMPLATE.format(
+        system=system,
+        chunks=format_chunks(hits),
+        post=post,
+    )
+    print("\n--- Calling Ollama ---")
+    raw = call_ollama(prompt, model=args.model, timeout=args.timeout)
+    label = parse_label(raw, labels)
+
+    print("\n--- Model reply ---")
+    print(raw.strip() or "(empty)")
+    print(f"\nParsed label: {label}")
+
+    if label == "UNKNOWN":
+        print("FAIL — could not parse a valid label.")
+        return 1
+
+    print("PASS — end-to-end RAG oneshot OK.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+===== ./experiments/smoke_fewshot.py =====
+"""
+smoke_fewshot.py
+================
+Smoke-test the few-shot example store (built by rebuild_all_artifacts.py).
+
+This store is not yet wired into RAG prompts; this script only checks that
+BM25 / dense / hybrid retrieval over the examples works.
+
+    python experiments/smoke_fewshot.py
+    python experiments/smoke_fewshot.py --head binary --k 3
+    python experiments/smoke_fewshot.py --skip-dense
+"""
+
+from __future__ import annotations
+
+import argparse
+
+from _common import SAMPLE_QUERIES, bootstrap, print_hits
+
+bootstrap()
+
+from components.config import (  # noqa: E402
+    FEWSHOT_BINARY_EXAMPLES_PATH,
+    FEWSHOT_CHROMA_PATH,
+    FEWSHOT_MULTICLASS_EXAMPLES_PATH,
+)
+from fewshot_retrievers import (  # noqa: E402
+    FewShotBM25Retriever,
+    build_fewshot_retrievers,
+    initialise_fewshot_dense_retrieval,
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Smoke-test few-shot retrievers.")
+    parser.add_argument("--head", choices=("multiclass", "binary"), default="multiclass")
+    parser.add_argument(
+        "--query",
+        choices=sorted(SAMPLE_QUERIES),
+        default="depression",
+    )
+    parser.add_argument("--k", type=int, default=3)
+    parser.add_argument("--skip-dense", action="store_true")
+    parser.add_argument("--alpha", type=float, default=0.3)
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    query = SAMPLE_QUERIES[args.query]
+    examples_path = (
+        FEWSHOT_MULTICLASS_EXAMPLES_PATH
+        if args.head == "multiclass"
+        else FEWSHOT_BINARY_EXAMPLES_PATH
+    )
+
+    print("=== Few-shot retrieval smoke ===")
+    print(f"head={args.head}  query={args.query}  k={args.k}")
+    print(f"examples: {examples_path}")
+    print(f"chroma:   {FEWSHOT_CHROMA_PATH}\n")
+
+    if not examples_path.exists():
+        print("FAIL — few-shot examples JSON missing.")
+        print("Build with: python src/builders/rebuild_all_artifacts.py")
+        return 1
+
+    bm25 = FewShotBM25Retriever(head=args.head)
+    print("--- Few-shot BM25 ---")
+    print_hits(bm25.search(query, k=args.k), score_key="bm25_score")
+
+    if args.skip_dense:
+        print("\nSkipped dense/hybrid (--skip-dense).")
+        print("PASS — few-shot BM25 OK.")
+        return 0
+
+    if not FEWSHOT_CHROMA_PATH.exists():
+        print(f"\nFAIL — few-shot Chroma missing at {FEWSHOT_CHROMA_PATH}")
+        return 1
+
+    initialise_fewshot_dense_retrieval()
+    retrievers = build_fewshot_retrievers(head=args.head, alpha=args.alpha)
+
+    print("\n--- Few-shot Dense ---")
+    print_hits(retrievers["dense"].search(query, k=args.k), score_key="dense_score")
+
+    print(f"\n--- Few-shot Hybrid (alpha={args.alpha}) ---")
+    print_hits(retrievers["hybrid"].search(query, k=args.k), score_key="hybrid_score")
+
+    print("\nPASS — few-shot retrieval OK.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+===== ./experiments/exp_fewshot_rag.py =====
+"""
+exp_fewshot_rag.py
+==================
+Experiment: wire few-shot *retrieval* into the classification prompt.
+
+Unlike the notebooks (which use static few-shot templates), this script:
+  1. Retrieves labeled posts from knowledge_base/fewshot/
+  2. Optionally also retrieves ICD-11 clinical chunks
+  3. Builds a dynamic few-shot prompt and calls Ollama
+
+    # Show retrieved examples + assembled prompt (no LLM)
+    python experiments/exp_fewshot_rag.py --dry-run
+
+    # End-to-end with few-shot BM25 + ICD-11 BM25
+    python experiments/exp_fewshot_rag.py --query depression
+
+    # Few-shot hybrid only (no ICD-11 context)
+    python experiments/exp_fewshot_rag.py --kb-retriever none --fewshot-retriever hybrid
+
+    # Compare prompt variants side-by-side
+    python experiments/exp_fewshot_rag.py --compare --query suicidal
+
+    # Binary head
+    python experiments/exp_fewshot_rag.py --head binary --query suicidal
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import urllib.error
+import urllib.request
+
+from _common import SAMPLE_QUERIES, bootstrap, load_mood_chunks, print_hits
+
+bootstrap()
+
+from bm25_retriever import BM25Retriever  # noqa: E402
+from components.config import (  # noqa: E402
+    CHROMA_PATH,
+    FEWSHOT_BINARY_EXAMPLES_PATH,
+    FEWSHOT_CHROMA_PATH,
+    FEWSHOT_MULTICLASS_EXAMPLES_PATH,
+    RETRIEVAL_SECTIONS,
+)
+from fewshot_retrievers import (  # noqa: E402
+    FewShotBM25Retriever,
+    build_fewshot_retrievers,
+    initialise_fewshot_dense_retrieval,
+)
+
+OLLAMA_URL = "http://localhost:11434/api/generate"
+
+MULTICLASS_SYSTEM = (
+    "You are a mental-health risk classifier for social-media posts. "
+    "You must reply with ONLY these two lines, nothing else:\n"
+    "Label: <suicidal|depression|normal>\n"
+    "Reason: <one sentence>\n"
+    "Do NOT give advice. Do NOT explain. Just the two lines above."
+)
+
+BINARY_SYSTEM = (
+    "You are a mental-health risk classifier for social-media posts. "
+    "You must reply with ONLY these two lines, nothing else:\n"
+    "Label: <suicide|non-suicide>\n"
+    "Reason: <one sentence>\n"
+    "Do NOT give advice. Do NOT explain. Just the two lines above."
+)
+
+PROMPT_TEMPLATE = """\
+{system}
+{kb_block}{examples_block}
+Post: {post}
+
+Answer:"""
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="RAG experiment with retrieved few-shot examples.",
+    )
+    parser.add_argument("--head", choices=("multiclass", "binary"), default="multiclass")
+    parser.add_argument("--query", choices=sorted(SAMPLE_QUERIES), default="depression")
+    parser.add_argument(
+        "--fewshot-retriever",
+        choices=("bm25", "dense", "hybrid"),
+        default="bm25",
+        help="Retriever over the few-shot example store.",
+    )
+    parser.add_argument(
+        "--kb-retriever",
+        choices=("none", "bm25", "dense", "hybrid"),
+        default="bm25",
+        help="Optional ICD-11 clinical retriever (none = examples only).",
+    )
+    parser.add_argument("--n-examples", type=int, default=3, help="Few-shot examples to inject.")
+    parser.add_argument("--k-kb", type=int, default=3, help="ICD-11 chunks to inject.")
+    parser.add_argument("--alpha", type=float, default=0.3, help="Hybrid BM25 weight.")
+    parser.add_argument("--model", default="qwen3:0.6b")
+    parser.add_argument("--timeout", type=int, default=120)
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print retrieved context + prompt; do not call Ollama.",
+    )
+    parser.add_argument(
+        "--compare",
+        action="store_true",
+        help="Run zero-shot / retrieved-fewshot / fewshot+KB variants.",
+    )
+    return parser
+
+
+def labels_for(head: str) -> list[str]:
+    if head == "binary":
+        return ["suicide", "non-suicide"]
+    return ["suicidal", "depression", "normal"]
+
+
+def system_for(head: str) -> str:
+    return BINARY_SYSTEM if head == "binary" else MULTICLASS_SYSTEM
+
+
+def build_kb_retriever(name: str, *, alpha: float):
+    if name == "none":
+        return None
+
+    sections = list(RETRIEVAL_SECTIONS)
+    mood_chunks = load_mood_chunks()
+    if name == "bm25":
+        return BM25Retriever(chunks=mood_chunks, sections=sections)
+
+    if not CHROMA_PATH.exists():
+        raise FileNotFoundError(f"ICD-11 ChromaDB missing at {CHROMA_PATH}")
+
+    from dense_retriever import DenseRetriever, initialise_retrieval
+    from hybrid_retriever import HybridRetriever
+
+    initialise_retrieval(chroma_path=str(CHROMA_PATH))
+    if name == "dense":
+        return DenseRetriever(sections=sections)
+    return HybridRetriever(chunks=mood_chunks, sections=sections, alpha=alpha)
+
+
+def build_fewshot_retriever(name: str, *, head: str, alpha: float):
+    examples_path = (
+        FEWSHOT_MULTICLASS_EXAMPLES_PATH
+        if head == "multiclass"
+        else FEWSHOT_BINARY_EXAMPLES_PATH
+    )
+    if not examples_path.exists():
+        raise FileNotFoundError(
+            f"Few-shot examples missing at {examples_path}. "
+            "Build with: python src/builders/rebuild_all_artifacts.py"
+        )
+
+    if name == "bm25":
+        return FewShotBM25Retriever(head=head)
+
+    if not FEWSHOT_CHROMA_PATH.exists():
+        raise FileNotFoundError(f"Few-shot Chroma missing at {FEWSHOT_CHROMA_PATH}")
+
+    initialise_fewshot_dense_retrieval()
+    return build_fewshot_retrievers(head=head, alpha=alpha)[name]
+
+
+def format_kb_block(hits: list[dict]) -> str:
+    if not hits:
+        return ""
+    lines = []
+    for i, hit in enumerate(hits, start=1):
+        text = hit.get("prompt_text") or hit.get("text") or ""
+        lines.append(
+            f"[{i}] ({hit.get('disorder_name', '')} — {hit.get('section', '')}): {text}"
+        )
+    return (
+        "\nRelevant clinical knowledge:\n"
+        + "\n".join(lines)
+        + "\n---\n"
+    )
+
+
+def format_examples_block(examples: list[dict]) -> str:
+    if not examples:
+        return ""
+    lines = []
+    for ex in examples:
+        post = (ex.get("post") or ex.get("text") or "").strip()
+        label = ex.get("label", "")
+        lines.append(f'Post: "{post}"\nLabel: {label}')
+    return "\nExamples:\n" + "\n\n".join(lines) + "\n---\n"
+
+
+def build_prompt(
+    *,
+    system: str,
+    post: str,
+    kb_hits: list[dict],
+    examples: list[dict],
+) -> str:
+    return PROMPT_TEMPLATE.format(
+        system=system,
+        kb_block=format_kb_block(kb_hits),
+        examples_block=format_examples_block(examples),
+        post=post,
+    )
+
+
+def parse_label(text: str, valid_labels: list[str]) -> str:
+    cleaned = (text or "").strip()
+    match = re.search(r"Label:\s*([A-Za-z0-9_\-]+)", cleaned, flags=re.IGNORECASE)
+    if match:
+        candidate = match.group(1).strip().lower().replace("_", "-")
+        for label in valid_labels:
+            if candidate == label.lower():
+                return label
+    lower = cleaned.lower()
+    for label in valid_labels:
+        if label.lower() in lower:
+            return label
+    return "UNKNOWN"
+
+
+def call_ollama(prompt: str, *, model: str, timeout: int) -> str:
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": 0.0},
+    }
+    req = urllib.request.Request(
+        OLLAMA_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        raise RuntimeError(
+            f"Ollama request failed ({exc}). Is Ollama running and is '{model}' pulled?"
+        ) from exc
+    return body.get("response", "")
+
+
+def run_variant(
+    *,
+    name: str,
+    post: str,
+    system: str,
+    labels: list[str],
+    kb_hits: list[dict],
+    examples: list[dict],
+    model: str,
+    timeout: int,
+    dry_run: bool,
+) -> str:
+    print(f"\n===== Variant: {name} =====")
+    if examples:
+        print(f"Few-shot examples ({len(examples)}):")
+        print_hits(examples, limit=len(examples))
+    else:
+        print("Few-shot examples: (none)")
+
+    if kb_hits:
+        print(f"\nICD-11 chunks ({len(kb_hits)}):")
+        print_hits(kb_hits, limit=len(kb_hits))
+    else:
+        print("\nICD-11 chunks: (none)")
+
+    prompt = build_prompt(
+        system=system,
+        post=post,
+        kb_hits=kb_hits,
+        examples=examples,
+    )
+
+    if dry_run:
+        print("\n--- Assembled prompt ---")
+        print(prompt)
+        return "DRY_RUN"
+
+    print("\n--- Calling Ollama ---")
+    raw = call_ollama(prompt, model=model, timeout=timeout)
+    label = parse_label(raw, labels)
+    print("--- Model reply ---")
+    print(raw.strip() or "(empty)")
+    print(f"Parsed label: {label}")
+    return label
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    post = SAMPLE_QUERIES[args.query]
+    labels = labels_for(args.head)
+    system = system_for(args.head)
+
+    print("=== Few-shot retrieval RAG experiment ===")
+    print(f"head={args.head}  query={args.query}")
+    print(f"fewshot={args.fewshot_retriever}  n_examples={args.n_examples}")
+    print(f"kb={args.kb_retriever}  k_kb={args.k_kb}")
+    print(f"model={args.model}  dry_run={args.dry_run}  compare={args.compare}")
+    print(f"\nPost: {post}")
+
+    fs_retriever = build_fewshot_retriever(
+        args.fewshot_retriever, head=args.head, alpha=args.alpha
+    )
+    examples = fs_retriever.search(post, k=args.n_examples)
+
+    kb_retriever = build_kb_retriever(args.kb_retriever, alpha=args.alpha)
+    kb_hits = (
+        kb_retriever.search(post, k=args.k_kb, expand=True)
+        if kb_retriever is not None
+        else []
+    )
+
+    if args.compare:
+        variants = [
+            ("zero_shot_no_kb", [], []),
+            ("retrieved_fewshot_only", examples, []),
+            ("retrieved_fewshot_plus_kb", examples, kb_hits),
+        ]
+        results: dict[str, str] = {}
+        for name, ex, kb in variants:
+            results[name] = run_variant(
+                name=name,
+                post=post,
+                system=system,
+                labels=labels,
+                kb_hits=kb,
+                examples=ex,
+                model=args.model,
+                timeout=args.timeout,
+                dry_run=args.dry_run,
+            )
+
+        print("\n===== Comparison summary =====")
+        for name, label in results.items():
+            print(f"  {name:28} -> {label}")
+        if args.dry_run:
+            print("PASS — few-shot retrieval compare (dry-run) OK.")
+            return 0
+        if any(v == "UNKNOWN" for v in results.values()):
+            print("FAIL — at least one variant returned UNKNOWN.")
+            return 1
+        print("PASS — few-shot retrieval compare OK.")
+        return 0
+
+    label = run_variant(
+        name="retrieved_fewshot_plus_kb"
+        if kb_hits
+        else "retrieved_fewshot_only",
+        post=post,
+        system=system,
+        labels=labels,
+        kb_hits=kb_hits,
+        examples=examples,
+        model=args.model,
+        timeout=args.timeout,
+        dry_run=args.dry_run,
+    )
+
+    if args.dry_run:
+        print("\nPASS — few-shot retrieval experiment (dry-run) OK.")
+        return 0
+    if label == "UNKNOWN":
+        print("\nFAIL — could not parse a valid label.")
+        return 1
+    print("\nPASS — few-shot retrieval RAG experiment OK.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+===== ./experiments/_common.py =====
+"""
+Shared helpers for small pipeline smoke experiments.
+
+Usage from any script in experiments/:
+    from _common import bootstrap, SAMPLE_QUERIES, print_hits, load_mood_chunks
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def bootstrap() -> Path:
+    """Put src/ and src/retriever/ on sys.path; return project root."""
+    src = PROJECT_ROOT / "src"
+    for path in (src, src / "retriever"):
+        s = str(path)
+        if s not in sys.path:
+            sys.path.insert(0, s)
+    return PROJECT_ROOT
+
+
+def print_hits(hits: list[dict], *, score_key: str | None = None, limit: int = 5) -> None:
+    """Pretty-print retrieval hits (ICD-11 chunks or few-shot examples)."""
+    if not hits:
+        print("  (no hits)")
+        return
+
+    for i, hit in enumerate(hits[:limit], start=1):
+        score = None
+        if score_key and score_key in hit:
+            score = hit[score_key]
+        else:
+            for key in ("hybrid_score", "dense_score", "bm25_score", "score"):
+                if key in hit:
+                    score = hit[key]
+                    break
+
+        if "disorder_code" in hit or "disorder_name" in hit:
+            label = (
+                f"{hit.get('disorder_code', '?')} | "
+                f"{hit.get('disorder_name', '?')} | "
+                f"{hit.get('section', '?')}"
+            )
+            text = (hit.get("prompt_text") or hit.get("text") or "").replace("\n", " ")
+        else:
+            label = f"{hit.get('label', '?')} | {hit.get('head', 'fewshot')}"
+            text = (hit.get("post") or hit.get("text") or "").replace("\n", " ")
+
+        score_s = f"  score={score:.4f}" if isinstance(score, (int, float)) else ""
+        print(f"  [{i}]{score_s}  {label}")
+        print(f"      {text[:160]}{'…' if len(text) > 160 else ''}")
+
+
+def load_mood_chunks():
+    """ICD-11 chunks filtered to mood disorders + retrieval sections (notebook policy)."""
+    from components.config import MOOD_DISORDER_PREFIXES, RETRIEVAL_SECTIONS
+    from utils import (
+        filter_chunks_by_disorder_codes,
+        filter_chunks_by_sections,
+        load_chunks,
+    )
+
+    chunks = load_chunks()
+    chunks = filter_chunks_by_disorder_codes(chunks, MOOD_DISORDER_PREFIXES)
+    chunks = filter_chunks_by_sections(chunks, RETRIEVAL_SECTIONS)
+    return chunks
+
+
+SAMPLE_QUERIES: dict[str, str] = {
+    "depression": (
+        "I've been sad most days, nothing feels enjoyable anymore, "
+        "and I feel worthless even though I wouldn't hurt myself."
+    ),
+    "suicidal": (
+        "I don't see the point in living anymore. "
+        "I've been thinking about ending it and making a plan."
+    ),
+    "normal": (
+        "Had a long day at work but hanging out with friends tonight. "
+        "Feeling okay overall."
+    ),
+}
+===== ./experiments/run_smoke_suite.py =====
+"""
+run_smoke_suite.py
+==================
+Run the no-LLM smoke experiments in order (paths → retrieval → few-shot).
+
+    python experiments/run_smoke_suite.py
+    python experiments/run_smoke_suite.py --skip-dense
+    python experiments/run_smoke_suite.py --with-rag   # also needs Ollama
+
+Dense steps download/load BioLORD on first run and can take a while.
+"""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+
+def run_step(script: str, extra: list[str]) -> int:
+    cmd = [sys.executable, str(HERE / script), *extra]
+    print("\n" + "=" * 60)
+    print("RUN:", " ".join(cmd))
+    print("=" * 60)
+    completed = subprocess.run(cmd, cwd=str(HERE.parent))
+    return completed.returncode
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run pipeline smoke experiments.")
+    parser.add_argument(
+        "--skip-dense",
+        action="store_true",
+        help="Pass --skip-dense to retrieval/few-shot smokes.",
+    )
+    parser.add_argument(
+        "--with-rag",
+        action="store_true",
+        help="Also run the Ollama oneshot RAG smoke (BM25 + qwen3:0.6b).",
+    )
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    dense_flags = ["--skip-dense"] if args.skip_dense else []
+
+    steps: list[tuple[str, list[str]]] = [
+        ("smoke_paths.py", []),
+        ("smoke_retrieval.py", dense_flags),
+        ("smoke_fewshot.py", dense_flags),
+    ]
+    if args.with_rag:
+        steps.append(("smoke_rag_oneshot.py", ["--retriever", "bm25"]))
+
+    failures = 0
+    for script, flags in steps:
+        code = run_step(script, flags)
+        if code != 0:
+            failures += 1
+            print(f"\nSTEP FAILED ({code}): {script}")
+
+    print("\n" + "=" * 60)
+    if failures:
+        print(f"DONE — {failures} step(s) failed.")
+        return 1
+    print("DONE — all requested smoke steps passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+===== ./experiments/smoke_paths.py =====
+"""
+smoke_paths.py
+==============
+Quick existence check for assets the current pipeline needs.
+
+    python experiments/smoke_paths.py
+"""
+
+from __future__ import annotations
+
+from _common import bootstrap
+
+bootstrap()
+
+from components.config import (  # noqa: E402
+    BINARY_DEV_PATH,
+    BINARY_EVAL_PATH,
+    BINARY_SOURCE_PATH,
+    CHROMA_PATH,
+    CHUNKS_PATH,
+    FEWSHOT_BINARY_EXAMPLES_PATH,
+    FEWSHOT_CHROMA_PATH,
+    FEWSHOT_MULTICLASS_EXAMPLES_PATH,
+    MULTICLASS_DEV_PATH,
+    MULTICLASS_EVAL_PATH,
+    PDF_PATH,
+)
+
+
+def check(label: str, path, *, required: bool = True) -> bool:
+    ok = path.exists()
+    flag = "OK" if ok else ("MISSING" if required else "optional-missing")
+    print(f"  [{flag:16}] {label}")
+    print(f"                   {path}")
+    return ok or not required
+
+
+def main() -> int:
+    print("=== Pipeline asset check ===\n")
+
+    required_ok = True
+    print("ICD-11 knowledge base")
+    required_ok &= check("PDF (chunking source)", PDF_PATH, required=False)
+    required_ok &= check("Chunks JSON", CHUNKS_PATH)
+    required_ok &= check("ChromaDB store", CHROMA_PATH)
+
+    print("\nProcessed datasets")
+    required_ok &= check("Multiclass eval", MULTICLASS_EVAL_PATH)
+    required_ok &= check("Multiclass dev", MULTICLASS_DEV_PATH)
+    required_ok &= check("Binary eval", BINARY_EVAL_PATH)
+    required_ok &= check("Binary dev", BINARY_DEV_PATH)
+
+    print("\nRaw / few-shot (optional for retrieval smokes)")
+    check("Binary raw source", BINARY_SOURCE_PATH, required=False)
+    check("Few-shot multiclass JSON", FEWSHOT_MULTICLASS_EXAMPLES_PATH, required=False)
+    check("Few-shot binary JSON", FEWSHOT_BINARY_EXAMPLES_PATH, required=False)
+    check("Few-shot ChromaDB", FEWSHOT_CHROMA_PATH, required=False)
+
+    print()
+    if required_ok:
+        print("PASS — required pipeline assets are present.")
+        return 0
+
+    print("FAIL — fix missing required assets before running retrieval/RAG smokes.")
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+===== ./src/builders/__init__.py =====
+"""Dataset and KB build entrypoints."""
+===== ./src/builders/run_kb_pipeline.py =====
+"""
+run_kb_pipeline.py
+==================
+CLI entrypoint for the ICD-11 knowledge-base pipeline.
+
+Runs:
+1) chunking  (PDF -> JSON chunks)
+2) ingestion (JSON chunks -> ChromaDB vectors)
+
+Documented walkthrough (orchestration + inspection + explanations):
+    notebooks/01_kb_pipeline_demo.ipynb
+
+Prefer that notebook for thesis-facing explanation. This file remains the
+automation entrypoint (`python src/builders/run_kb_pipeline.py`).
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+_BUILDERS_DIR = Path(__file__).resolve().parent
+_SRC = _BUILDERS_DIR.parent
+_PROJECT_ROOT = _SRC.parent
+for _path in (_SRC, _SRC / "retriever", _BUILDERS_DIR):
+    _s = str(_path)
+    if _s not in sys.path:
+        sys.path.insert(0, _s)
+
+try:
+    from config import (
+        BATCH_SIZE,
+        CHROMA_PATH,
+        CHUNKS_PATH,
+        COLLECTION_NAME,
+        CONTENT_END_PAGE,
+        CONTENT_START_PAGE,
+        EMBEDDING_MODEL,
+        PDF_PATH,
+    )
+    from chunker import CHUNK_WORD_OVERLAP, MAX_CHUNK_WORDS, run_chunking
+    from ingestion import run_ingestion
+except ModuleNotFoundError:
+    from components.config import (
+        BATCH_SIZE,
+        CHROMA_PATH,
+        CHUNKS_PATH,
+        COLLECTION_NAME,
+        CONTENT_END_PAGE,
+        CONTENT_START_PAGE,
+        EMBEDDING_MODEL,
+        PDF_PATH,
+    )
+    from components.chunker import CHUNK_WORD_OVERLAP, MAX_CHUNK_WORDS, run_chunking
+    from components.ingestion import run_ingestion
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Run chunking then ingestion for the ICD-11 knowledge base.",
+    )
+    parser.add_argument("--pdf-path", type=str, default=str(PDF_PATH))
+    parser.add_argument("--chunks-path", type=str, default=str(CHUNKS_PATH))
+    parser.add_argument("--chroma-path", type=str, default=str(CHROMA_PATH))
+    parser.add_argument("--collection-name", type=str, default=COLLECTION_NAME)
+    parser.add_argument("--embedding-model", type=str, default=EMBEDDING_MODEL)
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    parser.add_argument("--start-page", type=int, default=CONTENT_START_PAGE)
+    parser.add_argument("--end-page", type=int, default=CONTENT_END_PAGE)
+    parser.add_argument("--max-words", type=int, default=MAX_CHUNK_WORDS)
+    parser.add_argument("--overlap-words", type=int, default=CHUNK_WORD_OVERLAP)
+    parser.add_argument(
+        "--skip-chunking",
+        action="store_true",
+        help="Use existing chunks JSON and only run ingestion.",
+    )
+    parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Delete existing Chroma collection and re-ingest.",
+    )
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+
+    if not args.skip_chunking:
+        print("\n=== Step 1/2: Chunking ===")
+        run_chunking(
+            pdf_path=args.pdf_path,
+            chunks_path=args.chunks_path,
+            start_page=args.start_page,
+            end_page=args.end_page,
+            max_words=args.max_words,
+            overlap_words=args.overlap_words,
+        )
+    else:
+        print("\n=== Step 1/2: Chunking skipped ===")
+
+    print("\n=== Step 2/2: Ingestion ===")
+    run_ingestion(
+        chunks_path=args.chunks_path,
+        chroma_path=args.chroma_path,
+        collection_name=args.collection_name,
+        embedding_model_name=args.embedding_model,
+        batch_size=args.batch_size,
+        rebuild=args.rebuild,
+    )
+
+    print("\nPipeline finished successfully.")
+
+
+if __name__ == "__main__":
+    main()
+===== ./src/builders/build_multiclass_dataset.py =====
+"""
+build_multiclass_dataset.py
+===========================
+Build reproducible stratified multiclass evaluation artifacts:
+
+1) datasets/processed/multiclass_eval.csv  — final reporting set (150/class = 450)
+2) datasets/processed/multiclass_dev.csv   — prompt/k tuning slice drawn from (1) (10/class = 30)
+
+Documented walkthrough:
+    notebooks/02_multiclass_dataset_prep.ipynb
+
+Automation entrypoint:
+    python src/builders/build_multiclass_dataset.py
+
+Raw HF CSV caches live under datasets/raw/. Re-running with the same inputs
+and seeds must produce identical processed CSVs and metadata.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+# Allow `python src/builders/build_multiclass_dataset.py` from the repo root.
+_BUILDERS_DIR = Path(__file__).resolve().parent
+_SRC = _BUILDERS_DIR.parent
+_PROJECT_ROOT = _SRC.parent
+for _path in (_SRC, _SRC / "retriever", _BUILDERS_DIR):
+    _s = str(_path)
+    if _s not in sys.path:
+        sys.path.insert(0, _s)
+
+from components.config import (
+    DATASET_TEST_PATH,
+    DATASET_TRAIN_PATH,
+    HF_DATASET_REPO,
+    HF_TEST_FILE,
+    HF_TRAIN_FILE,
+    RAG_DEV_META_PATH,
+    RAG_DEV_PER_CLASS,
+    RAG_DEV_SEED,
+    RAG_DEV_SLICE_PATH,
+    RAG_EVAL_EXCLUDE,
+    RAG_EVAL_LABELS,
+    RAG_EVAL_MAX_CHARS,
+    RAG_EVAL_META_PATH,
+    RAG_EVAL_MIN_CHARS,
+    RAG_EVAL_PER_CLASS,
+    RAG_EVAL_SEED,
+    RAG_EVAL_SUBSET_PATH,
+)
+
+_WHITESPACE_RE = re.compile(r"\s+")
+_URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
+
+
+def _file_info(path: Path) -> dict:
+    if not path.exists():
+        return {"path": str(path), "exists": False}
+    return {
+        "path": str(path),
+        "exists": True,
+        "size_bytes": path.stat().st_size,
+    }
+
+
+def _normalize_frame(df: pd.DataFrame, source_split: str) -> pd.DataFrame:
+    if "status" not in df.columns or "text" not in df.columns:
+        raise ValueError(
+            f"Expected columns 'text' and 'status' in {source_split} split; "
+            f"got {list(df.columns)}"
+        )
+    out = pd.DataFrame(
+        {
+            "text": df["text"].astype(str),
+            "label": df["status"].astype(str).str.strip().str.lower(),
+            "source_split": source_split,
+        }
+    )
+    return out
+
+
+def load_raw_frames() -> tuple[pd.DataFrame, dict]:
+    """Load train+test from local CSVs, or Hugging Face Hub if missing."""
+    local_ok = DATASET_TRAIN_PATH.exists() and DATASET_TEST_PATH.exists()
+    stats: dict = {
+        "load_mode": "local" if local_ok else "huggingface",
+        "train_input": _file_info(DATASET_TRAIN_PATH),
+        "test_input": _file_info(DATASET_TEST_PATH),
+        "hf_repo": HF_DATASET_REPO,
+    }
+
+    if local_ok:
+        print(f"Loading local CSVs:\n  {DATASET_TRAIN_PATH}\n  {DATASET_TEST_PATH}")
+        train_df = pd.read_csv(DATASET_TRAIN_PATH)
+        test_df = pd.read_csv(DATASET_TEST_PATH)
+    else:
+        print(
+            "Local CSVs missing; downloading from Hugging Face Hub "
+            f"({HF_DATASET_REPO})..."
+        )
+        from datasets import load_dataset
+
+        ds = load_dataset(
+            HF_DATASET_REPO,
+            data_files={
+                "train": HF_TRAIN_FILE,
+                "test": HF_TEST_FILE,
+            },
+        )
+        train_df = ds["train"].to_pandas()
+        test_df = ds["test"].to_pandas()
+
+        # Cache for offline reuse by teammates / later runs.
+        DATASET_TRAIN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        train_df.to_csv(DATASET_TRAIN_PATH, index=False)
+        test_df.to_csv(DATASET_TEST_PATH, index=False)
+        print(f"Cached Hub downloads to:\n  {DATASET_TRAIN_PATH}\n  {DATASET_TEST_PATH}")
+        stats["train_input"] = _file_info(DATASET_TRAIN_PATH)
+        stats["test_input"] = _file_info(DATASET_TEST_PATH)
+
+    frames = [
+        _normalize_frame(train_df, "train"),
+        _normalize_frame(test_df, "test"),
+    ]
+    merged = pd.concat(frames, ignore_index=True)
+    stats["rows_raw"] = int(len(merged))
+    stats["label_counts_raw"] = merged["label"].value_counts().to_dict()
+    return merged, stats
+
+
+def clean_text(text: str) -> str:
+    text = text.strip()
+    text = _URL_RE.sub(" ", text)
+    text = _WHITESPACE_RE.sub(" ", text).strip()
+    return text
+
+
+def filter_and_clean(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    stats: dict = {}
+    exclude = {label.lower() for label in RAG_EVAL_EXCLUDE}
+    keep = {label.lower() for label in RAG_EVAL_LABELS}
+
+    before_exclude = len(df)
+    df = df[~df["label"].isin(exclude)].copy()
+    stats["rows_after_exclude"] = int(len(df))
+    stats["rows_dropped_exclude"] = int(before_exclude - len(df))
+
+    df = df[df["label"].isin(keep)].copy()
+    stats["rows_after_label_filter"] = int(len(df))
+
+    df["text"] = df["text"].map(clean_text)
+    before_empty = len(df)
+    df = df[df["text"].str.len() > 0].copy()
+    stats["rows_dropped_empty"] = int(before_empty - len(df))
+
+    before_len = len(df)
+    df = df[
+        (df["text"].str.len() >= RAG_EVAL_MIN_CHARS)
+        & (df["text"].str.len() <= RAG_EVAL_MAX_CHARS)
+    ].copy()
+    stats["rows_after_length_filter"] = int(len(df))
+    stats["rows_dropped_length"] = int(before_len - len(df))
+
+    before_dedupe = len(df)
+    df["_text_key"] = df["text"].str.lower()
+    df = df.drop_duplicates(subset=["_text_key"], keep="first").drop(
+        columns=["_text_key"]
+    )
+    stats["rows_after_dedupe"] = int(len(df))
+    stats["rows_dropped_dedupe"] = int(before_dedupe - len(df))
+    stats["label_counts_clean"] = df["label"].value_counts().to_dict()
+    return df.reset_index(drop=True), stats
+
+
+def stratified_sample(
+    df: pd.DataFrame,
+    *,
+    per_class: int,
+    seed: int,
+    id_prefix: str,
+) -> pd.DataFrame:
+    parts: list[pd.DataFrame] = []
+    for label in RAG_EVAL_LABELS:
+        pool = df[df["label"] == label]
+        n_available = len(pool)
+        if n_available < per_class:
+            raise RuntimeError(
+                f"Not enough rows for label '{label}': "
+                f"need {per_class}, have {n_available} after filtering."
+            )
+        # Stable order within class before sampling so pandas RNG is deterministic.
+        sort_cols = [c for c in ("source_split", "text", "row_id") if c in pool.columns]
+        pool = pool.sort_values(sort_cols, kind="mergesort")
+        sampled = pool.sample(n=per_class, random_state=seed)
+        parts.append(sampled)
+
+    # Deterministic final order: by label order, then text.
+    out = pd.concat(parts, ignore_index=True)
+    label_order = {label: i for i, label in enumerate(RAG_EVAL_LABELS)}
+    out["_label_order"] = out["label"].map(label_order)
+    out = out.sort_values(["_label_order", "text"], kind="mergesort").drop(
+        columns=["_label_order"]
+    )
+    out = out.reset_index(drop=True)
+
+    # Preserve parent eval row_id when carving the dev slice from the final set.
+    if "row_id" in out.columns and id_prefix == "dev":
+        out = out.rename(columns={"row_id": "parent_row_id"})
+        out.insert(0, "row_id", [f"dev_{i:04d}" for i in range(len(out))])
+        cols = ["row_id", "parent_row_id", "text", "label", "source_split"]
+        return out[cols]
+
+    out = out.drop(columns=["row_id"], errors="ignore")
+    out.insert(0, "row_id", [f"{id_prefix}_{i:04d}" for i in range(len(out))])
+    return out[["row_id", "text", "label", "source_split"]]
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_csv_and_meta(
+    frame: pd.DataFrame,
+    csv_path: Path,
+    meta_path: Path,
+    meta: dict,
+) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(csv_path, index=False, lineterminator="\n")
+
+    meta["output_csv"] = str(csv_path)
+    meta["output_rows"] = int(len(frame))
+    meta["output_label_counts"] = frame["label"].value_counts().to_dict()
+    meta["csv_sha256"] = sha256_file(csv_path)
+
+    meta_path.write_text(
+        json.dumps(meta, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(f"Wrote {csv_path} ({len(frame)} rows)")
+    print(f"Wrote {meta_path}")
+    print(f"SHA256: {meta['csv_sha256']}")
+
+
+def build() -> tuple[pd.DataFrame, pd.DataFrame]:
+    raw, load_stats = load_raw_frames()
+    cleaned, clean_stats = filter_and_clean(raw)
+
+    subset = stratified_sample(
+        cleaned,
+        per_class=RAG_EVAL_PER_CLASS,
+        seed=RAG_EVAL_SEED,
+        id_prefix="rag",
+    )
+    eval_meta = {
+        "artifact": "multiclass_eval",
+        "seed": RAG_EVAL_SEED,
+        "per_class": RAG_EVAL_PER_CLASS,
+        "labels": list(RAG_EVAL_LABELS),
+        "exclude_labels": list(RAG_EVAL_EXCLUDE),
+        "min_chars": RAG_EVAL_MIN_CHARS,
+        "max_chars": RAG_EVAL_MAX_CHARS,
+        **load_stats,
+        **clean_stats,
+    }
+    write_csv_and_meta(subset, RAG_EVAL_SUBSET_PATH, RAG_EVAL_META_PATH, eval_meta)
+    print("Final eval label counts:\n" + subset["label"].value_counts().to_string())
+
+    # Dev slice is carved from the locked final set (not re-sampled from the full pool),
+    # so tuning posts are a transparent subset of the reporting set.
+    dev = stratified_sample(
+        subset,
+        per_class=RAG_DEV_PER_CLASS,
+        seed=RAG_DEV_SEED,
+        id_prefix="dev",
+    )
+    dev_meta = {
+        "artifact": "multiclass_dev",
+        "seed": RAG_DEV_SEED,
+        "per_class": RAG_DEV_PER_CLASS,
+        "labels": list(RAG_EVAL_LABELS),
+        "parent_csv": str(RAG_EVAL_SUBSET_PATH),
+        "parent_sha256": eval_meta["csv_sha256"],
+        "parent_row_ids": dev["parent_row_id"].tolist(),
+        "purpose": "prompt/k tuning only; switch notebook eval_mode to final for reporting",
+    }
+    write_csv_and_meta(dev, RAG_DEV_SLICE_PATH, RAG_DEV_META_PATH, dev_meta)
+    print("Dev slice label counts:\n" + dev["label"].value_counts().to_string())
+    return subset, dev
+
+
+def main() -> None:
+    build()
+
+
+if __name__ == "__main__":
+    main()
+===== ./src/builders/rebuild_all_artifacts.py =====
+"""
+rebuild_all_artifacts.py
+========================
+Rebuild both processed evaluation datasets (multiclass + binary) and build a
+few-shot Chroma vector store from the raw datasets.
+
+Blueprint alignment:
+- Multiclass head uses the HF mental-health dataset.
+- Binary head uses `datasets/raw/suicide_detection_raw.csv`.
+- Few-shot vector DB stores (example_text, label) pairs that can later be
+  retrieved to assemble dynamic few-shot prompts.
+
+Important:
+- We build the vector DB, but we do NOT wire retrieval from it into the
+  classification pipeline yet.
+- Few-shot examples are taken from the raw datasets, but they are passed
+  through the same cleaning / filtering pipeline used by the processed
+  evaluation datasets before they are sampled and embedded.
+
+Run:
+    python src/builders/rebuild_all_artifacts.py
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import random
+import runpy
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+_BUILDERS_DIR = Path(__file__).resolve().parent
+_SRC = _BUILDERS_DIR.parent
+_PROJECT_ROOT = _SRC.parent
+for _path in (_SRC, _SRC / "retriever", _BUILDERS_DIR):
+    _s = str(_path)
+    if _s not in sys.path:
+        sys.path.insert(0, _s)
+
+from components.config import (  # noqa: E402
+    BINARY_LABELS,
+    EMBEDDING_MODEL,
+    FEWSHOT_BINARY_EXAMPLES_PATH,
+    FEWSHOT_BUILD_SEED,
+    FEWSHOT_CHROMA_PATH,
+    FEWSHOT_COLLECTION_BINARY,
+    FEWSHOT_COLLECTION_MULTICLASS,
+    FEWSHOT_DB_META_PATH,
+    FEWSHOT_EMBED_BATCH_SIZE,
+    FEWSHOT_EMBEDDING_MAX_SEQ_LENGTH,
+    FEWSHOT_BINARY_MAX_PER_CLASS,
+    FEWSHOT_MULTICLASS_EXAMPLES_PATH,
+    FEWSHOT_MULTICLASS_MAX_PER_LABEL,
+    RAG_EVAL_LABELS,
+)
+import build_binary_dataset as binary_builder  # noqa: E402
+import build_multiclass_dataset as multiclass_builder  # noqa: E402
+
+
+def _build_multiclass_fewshot_pool() -> pd.DataFrame:
+    raw, _ = multiclass_builder.load_raw_frames()
+    cleaned, _ = multiclass_builder.filter_and_clean(raw)
+    return cleaned.reset_index(drop=True)
+
+
+def _build_binary_fewshot_pool() -> pd.DataFrame:
+    raw, _ = binary_builder.load_raw_frame()
+    cleaned, _ = binary_builder.filter_and_clean(raw)
+    return cleaned.reset_index(drop=True)
+
+
+def _sample_balanced(df: pd.DataFrame, *, labels: list[str], per_label: int, seed: int) -> pd.DataFrame:
+    random.seed(seed)
+    parts: list[pd.DataFrame] = []
+    for label in labels:
+        pool = df[df["label"] == label].copy()
+        pool = pool.sort_values(["text"], kind="mergesort")
+        if len(pool) < per_label:
+            raise RuntimeError(
+                f"Not enough rows for label '{label}' in few-shot pool: need {per_label}, have {len(pool)}."
+            )
+        parts.append(pool.sample(n=per_label, random_state=seed))
+    out = pd.concat(parts, ignore_index=True)
+    # Deterministic final order for stable ids.
+    label_order = {label: i for i, label in enumerate(labels)}
+    out["_label_order"] = out["label"].map(label_order)
+    out = out.sort_values(["_label_order", "text"], kind="mergesort").drop(
+        columns=["_label_order"]
+    )
+    return out.reset_index(drop=True)
+
+
+def _export_examples_json(
+    frame: pd.DataFrame,
+    *,
+    head: str,
+    path: Path,
+    id_prefix: str,
+) -> list[dict]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows: list[dict] = []
+    for idx, row in frame.reset_index(drop=True).iterrows():
+        rows.append(
+            {
+                "id": f"{id_prefix}_{idx:06d}",
+                "head": head,
+                "post": row["text"],
+                "label": row["label"],
+                "text": row["text"],  # alias for downstream retriever convenience
+                "source_split": row.get("source_split", "source"),
+            }
+        )
+    path.write_text(json.dumps(rows, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"Wrote {path} ({len(rows)} examples)")
+    return rows
+
+
+def _embed_and_write_collection(
+    *,
+    chroma_client,
+    collection_name: str,
+    texts: list[str],
+    labels: list[str],
+    metadatas: list[dict],
+    ids: list[str],
+    rebuild: bool,
+) -> None:
+    import torch
+    import chromadb
+    from sentence_transformers import SentenceTransformer
+    from tqdm import tqdm
+
+    global _EMBEDDER
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"\nEmbedding for collection '{collection_name}' on device: {device}")
+
+    embedder = SentenceTransformer(EMBEDDING_MODEL, device=device)
+    embedder.max_seq_length = FEWSHOT_EMBEDDING_MAX_SEQ_LENGTH
+    print("Embedding model dims:", embedder.get_sentence_embedding_dimension())
+
+    if rebuild:
+        existing = [c.name for c in chroma_client.list_collections()]
+        if collection_name in existing:
+            chroma_client.delete_collection(collection_name)
+
+    collection = chroma_client.get_or_create_collection(
+        name=collection_name,
+        metadata={"hnsw:space": "cosine"},
+    )
+
+    existing_count = collection.count()
+    if existing_count == len(texts):
+        print(f"Collection '{collection_name}' already has {collection.count()} vectors; skipping.")
+        return
+    if existing_count != 0 and not rebuild:
+        raise RuntimeError(
+            f"Few-shot collection '{collection_name}' already exists with {existing_count} vectors, "
+            f"but expected {len(texts)}. Re-run with --reuse-fewshot-db only when counts match, "
+            f"or use default (rebuild)."
+        )
+
+    print(f"Writing {len(texts)} vectors into '{collection_name}' …")
+    # Embed in batches.
+    for i in tqdm(range(0, len(texts), FEWSHOT_EMBED_BATCH_SIZE), desc="Embedding batches"):
+        batch_texts = texts[i : i + FEWSHOT_EMBED_BATCH_SIZE]
+        batch_embeddings = embedder.encode(
+            batch_texts,
+            batch_size=FEWSHOT_EMBED_BATCH_SIZE,
+            show_progress_bar=False,
+            normalize_embeddings=True,
+        ).tolist()
+
+        batch_ids = ids[i : i + FEWSHOT_EMBED_BATCH_SIZE]
+        batch_metas = metadatas[i : i + FEWSHOT_EMBED_BATCH_SIZE]
+        collection.add(
+            ids=batch_ids,
+            embeddings=batch_embeddings,
+            metadatas=batch_metas,
+            documents=batch_texts,
+        )
+
+    print(f"Done. Collection '{collection_name}' now has {collection.count()} vectors.")
+
+
+def build_fewshot_db(*, rebuild: bool, seed: int) -> dict:
+    # Build pools from raw datasets using the same cleaning/filter pipeline
+    # as the processed eval/dev builders for consistency.
+    print("\nBuilding few-shot pools from raw datasets via the shared preprocessing pipeline …")
+    multi_pool = _build_multiclass_fewshot_pool()
+    bin_pool = _build_binary_fewshot_pool()
+
+    # Sample balanced caps for deterministic size.
+    multi_sample = _sample_balanced(
+        multi_pool,
+        labels=list(RAG_EVAL_LABELS),
+        per_label=FEWSHOT_MULTICLASS_MAX_PER_LABEL,
+        seed=seed,
+    )
+    bin_sample = _sample_balanced(
+        bin_pool,
+        labels=list(BINARY_LABELS),
+        per_label=FEWSHOT_BINARY_MAX_PER_CLASS,
+        seed=seed,
+    )
+
+    # Chroma persistence
+    FEWSHOT_CHROMA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    import chromadb
+
+    chroma_client = chromadb.PersistentClient(path=str(FEWSHOT_CHROMA_PATH))
+
+    # Multiclass collection
+    multi_rows = _export_examples_json(
+        multi_sample,
+        head="multiclass",
+        path=FEWSHOT_MULTICLASS_EXAMPLES_PATH,
+        id_prefix="mc",
+    )
+    multi_texts = [row["post"] for row in multi_rows]
+    multi_labels = [row["label"] for row in multi_rows]
+    multi_ids = [row["id"] for row in multi_rows]
+    multi_metas = [
+        {"head": row["head"], "label": row["label"], "source_split": row["source_split"]}
+        for row in multi_rows
+    ]
+    _embed_and_write_collection(
+        chroma_client=chroma_client,
+        collection_name=FEWSHOT_COLLECTION_MULTICLASS,
+        texts=multi_texts,
+        labels=multi_labels,
+        metadatas=multi_metas,
+        ids=multi_ids,
+        rebuild=rebuild,
+    )
+
+    # Binary collection
+    bin_rows = _export_examples_json(
+        bin_sample,
+        head="binary",
+        path=FEWSHOT_BINARY_EXAMPLES_PATH,
+        id_prefix="bin",
+    )
+    bin_texts = [row["post"] for row in bin_rows]
+    bin_labels = [row["label"] for row in bin_rows]
+    bin_ids = [row["id"] for row in bin_rows]
+    bin_metas = [
+        {"head": row["head"], "label": row["label"], "source_split": row["source_split"]}
+        for row in bin_rows
+    ]
+    _embed_and_write_collection(
+        chroma_client=chroma_client,
+        collection_name=FEWSHOT_COLLECTION_BINARY,
+        texts=bin_texts,
+        labels=bin_labels,
+        metadatas=bin_metas,
+        ids=bin_ids,
+        rebuild=rebuild,
+    )
+
+    meta = {
+        "artifact": "fewshot_db",
+        "seed": seed,
+        "embedding_model": EMBEDDING_MODEL,
+        "collections": {
+            "multiclass": {
+                "collection_name": FEWSHOT_COLLECTION_MULTICLASS,
+                "examples_json": str(FEWSHOT_MULTICLASS_EXAMPLES_PATH),
+                "per_label": FEWSHOT_MULTICLASS_MAX_PER_LABEL,
+                "labels": list(RAG_EVAL_LABELS),
+                "total_vectors": int(len(multi_texts)),
+            },
+            "binary": {
+                "collection_name": FEWSHOT_COLLECTION_BINARY,
+                "examples_json": str(FEWSHOT_BINARY_EXAMPLES_PATH),
+                "per_class": FEWSHOT_BINARY_MAX_PER_CLASS,
+                "labels": list(BINARY_LABELS),
+                "total_vectors": int(len(bin_texts)),
+            },
+        },
+        "multiclass_raw_pool_size": int(len(multi_pool)),
+        "binary_raw_pool_size": int(len(bin_pool)),
+        "rebuild": rebuild,
+    }
+    FEWSHOT_DB_META_PATH.write_text(
+        json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    print(f"\nWrote few-shot meta: {FEWSHOT_DB_META_PATH}")
+    return meta
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Rebuild eval/dev splits and build few-shot vector DB (no retrieval wiring yet)."
+    )
+    parser.add_argument(
+        "--skip-evals",
+        action="store_true",
+        help="Skip rebuilding eval/dev CSVs (still builds few-shot vector DB).",
+    )
+    parser.add_argument(
+        "--reuse-fewshot-db",
+        action="store_true",
+        help="Reuse existing few-shot Chroma vectors when counts match (skips expensive re-embedding).",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=FEWSHOT_BUILD_SEED,
+        help="Seed used for deterministic few-shot sampling (also used by builder scripts).",
+    )
+    args = parser.parse_args()
+
+    # CLI seed currently only affects few-shot sampling because the two eval/dev
+    # builders hardcode their own seeds via config constants. If you want them
+    # to follow a different seed, edit config and re-run.
+    print("=== Rebuild eval/dev ===")
+    if args.skip_evals:
+        print("Skipping eval/dev rebuild.")
+    else:
+        runpy.run_path(str(_BUILDERS_DIR / "build_multiclass_dataset.py"), run_name="__main__")
+        runpy.run_path(str(_BUILDERS_DIR / "build_binary_dataset.py"), run_name="__main__")
+
+    # Always build few-shot DB (this is the main request).
+    print("=== Build few-shot vector DB ===")
+    build_fewshot_db(rebuild=not bool(args.reuse_fewshot_db), seed=int(args.seed))
+
+    print("\nDone.")
+
+
+if __name__ == "__main__":
+    main()
+
+===== ./src/builders/build_binary_dataset.py =====
+"""
+build_binary_dataset.py
+=======================
+Build reproducible stratified binary suicide evaluation artifacts from:
+    datasets/raw/suicide_detection_raw.csv
+
+Outputs:
+1) datasets/processed/binary_suicide_eval.csv  — final reporting set (150/class = 300)
+2) datasets/processed/binary_suicide_dev.csv   — prompt/k tuning slice drawn from (1) (10/class = 20)
+
+Automation entrypoint:
+    python src/builders/build_binary_dataset.py
+
+Re-running with the same inputs and seeds must produce identical processed
+CSVs and metadata.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+_BUILDERS_DIR = Path(__file__).resolve().parent
+_SRC = _BUILDERS_DIR.parent
+_PROJECT_ROOT = _SRC.parent
+for _path in (_SRC, _SRC / "retriever", _BUILDERS_DIR):
+    _s = str(_path)
+    if _s not in sys.path:
+        sys.path.insert(0, _s)
+
+from components.config import (
+    BINARY_DEV_META_PATH,
+    BINARY_DEV_PER_CLASS,
+    BINARY_DEV_SEED,
+    BINARY_DEV_SLICE_PATH,
+    BINARY_EVAL_META_PATH,
+    BINARY_EVAL_PER_CLASS,
+    BINARY_EVAL_SEED,
+    BINARY_EVAL_SUBSET_PATH,
+    BINARY_LABELS,
+    BINARY_MAX_CHARS,
+    BINARY_MIN_CHARS,
+    BINARY_SOURCE_PATH,
+)
+
+_WHITESPACE_RE = re.compile(r"\s+")
+_URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
+
+
+def _file_info(path: Path) -> dict:
+    if not path.exists():
+        return {"path": str(path), "exists": False}
+    return {
+        "path": str(path),
+        "exists": True,
+        "size_bytes": path.stat().st_size,
+    }
+
+
+def load_raw_frame() -> tuple[pd.DataFrame, dict]:
+    if not BINARY_SOURCE_PATH.exists():
+        raise FileNotFoundError(
+            f"Binary source CSV not found: {BINARY_SOURCE_PATH}. "
+            "Place the raw source file under datasets/raw/."
+        )
+    print(f"Loading local CSV:\n  {BINARY_SOURCE_PATH}")
+    raw = pd.read_csv(BINARY_SOURCE_PATH)
+    if "text" not in raw.columns or "class" not in raw.columns:
+        raise ValueError(
+            f"Expected columns 'text' and 'class'; got {list(raw.columns)}"
+        )
+
+    out = pd.DataFrame(
+        {
+            "text": raw["text"].astype(str),
+            "label": raw["class"].astype(str).str.strip().str.lower(),
+            "source_split": "source",
+        }
+    )
+    stats = {
+        "load_mode": "local",
+        "source_input": _file_info(BINARY_SOURCE_PATH),
+        "rows_raw": int(len(out)),
+        "label_counts_raw": out["label"].value_counts().to_dict(),
+    }
+    return out, stats
+
+
+def clean_text(text: str) -> str:
+    text = text.strip()
+    text = _URL_RE.sub(" ", text)
+    text = _WHITESPACE_RE.sub(" ", text).strip()
+    return text
+
+
+def filter_and_clean(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    stats: dict = {}
+    keep = {label.lower() for label in BINARY_LABELS}
+
+    df = df[df["label"].isin(keep)].copy()
+    stats["rows_after_label_filter"] = int(len(df))
+
+    df["text"] = df["text"].map(clean_text)
+    before_empty = len(df)
+    df = df[df["text"].str.len() > 0].copy()
+    stats["rows_dropped_empty"] = int(before_empty - len(df))
+
+    before_len = len(df)
+    df = df[
+        (df["text"].str.len() >= BINARY_MIN_CHARS)
+        & (df["text"].str.len() <= BINARY_MAX_CHARS)
+    ].copy()
+    stats["rows_after_length_filter"] = int(len(df))
+    stats["rows_dropped_length"] = int(before_len - len(df))
+
+    before_dedupe = len(df)
+    df["_text_key"] = df["text"].str.lower()
+    df = df.drop_duplicates(subset=["_text_key"], keep="first").drop(
+        columns=["_text_key"]
+    )
+    stats["rows_after_dedupe"] = int(len(df))
+    stats["rows_dropped_dedupe"] = int(before_dedupe - len(df))
+    stats["label_counts_clean"] = df["label"].value_counts().to_dict()
+    return df.reset_index(drop=True), stats
+
+
+def stratified_sample(
+    df: pd.DataFrame,
+    *,
+    per_class: int,
+    seed: int,
+    id_prefix: str,
+) -> pd.DataFrame:
+    parts: list[pd.DataFrame] = []
+    for label in BINARY_LABELS:
+        pool = df[df["label"] == label]
+        n_available = len(pool)
+        if n_available < per_class:
+            raise RuntimeError(
+                f"Not enough rows for label '{label}': "
+                f"need {per_class}, have {n_available} after filtering."
+            )
+        sort_cols = [c for c in ("source_split", "text", "row_id") if c in pool.columns]
+        pool = pool.sort_values(sort_cols, kind="mergesort")
+        sampled = pool.sample(n=per_class, random_state=seed)
+        parts.append(sampled)
+
+    out = pd.concat(parts, ignore_index=True)
+    label_order = {label: i for i, label in enumerate(BINARY_LABELS)}
+    out["_label_order"] = out["label"].map(label_order)
+    out = out.sort_values(["_label_order", "text"], kind="mergesort").drop(
+        columns=["_label_order"]
+    )
+    out = out.reset_index(drop=True)
+
+    if "row_id" in out.columns and id_prefix == "bdev":
+        out = out.rename(columns={"row_id": "parent_row_id"})
+        out.insert(0, "row_id", [f"bdev_{i:04d}" for i in range(len(out))])
+        cols = ["row_id", "parent_row_id", "text", "label", "source_split"]
+        return out[cols]
+
+    out = out.drop(columns=["row_id"], errors="ignore")
+    out.insert(0, "row_id", [f"{id_prefix}_{i:04d}" for i in range(len(out))])
+    return out[["row_id", "text", "label", "source_split"]]
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_csv_and_meta(
+    frame: pd.DataFrame,
+    csv_path: Path,
+    meta_path: Path,
+    meta: dict,
+) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(csv_path, index=False, lineterminator="\n")
+
+    meta["output_csv"] = str(csv_path)
+    meta["output_rows"] = int(len(frame))
+    meta["output_label_counts"] = frame["label"].value_counts().to_dict()
+    meta["csv_sha256"] = sha256_file(csv_path)
+
+    meta_path.write_text(
+        json.dumps(meta, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(f"Wrote {csv_path} ({len(frame)} rows)")
+    print(f"Wrote {meta_path}")
+    print(f"SHA256: {meta['csv_sha256']}")
+
+
+def build() -> tuple[pd.DataFrame, pd.DataFrame]:
+    raw, load_stats = load_raw_frame()
+    cleaned, clean_stats = filter_and_clean(raw)
+
+    subset = stratified_sample(
+        cleaned,
+        per_class=BINARY_EVAL_PER_CLASS,
+        seed=BINARY_EVAL_SEED,
+        id_prefix="bin",
+    )
+    eval_meta = {
+        "artifact": "binary_suicide_eval",
+        "task": "binary_suicide_classification",
+        "seed": BINARY_EVAL_SEED,
+        "per_class": BINARY_EVAL_PER_CLASS,
+        "labels": list(BINARY_LABELS),
+        "min_chars": BINARY_MIN_CHARS,
+        "max_chars": BINARY_MAX_CHARS,
+        **load_stats,
+        **clean_stats,
+    }
+    write_csv_and_meta(
+        subset, BINARY_EVAL_SUBSET_PATH, BINARY_EVAL_META_PATH, eval_meta
+    )
+    print("Final eval label counts:\n" + subset["label"].value_counts().to_string())
+
+    dev = stratified_sample(
+        subset,
+        per_class=BINARY_DEV_PER_CLASS,
+        seed=BINARY_DEV_SEED,
+        id_prefix="bdev",
+    )
+    dev_meta = {
+        "artifact": "binary_suicide_dev",
+        "task": "binary_suicide_classification",
+        "seed": BINARY_DEV_SEED,
+        "per_class": BINARY_DEV_PER_CLASS,
+        "labels": list(BINARY_LABELS),
+        "parent_csv": str(BINARY_EVAL_SUBSET_PATH),
+        "parent_sha256": eval_meta["csv_sha256"],
+        "parent_row_ids": dev["parent_row_id"].tolist(),
+        "purpose": "prompt/k tuning only; switch notebook eval_mode to final for reporting",
+    }
+    write_csv_and_meta(dev, BINARY_DEV_SLICE_PATH, BINARY_DEV_META_PATH, dev_meta)
+    print("Dev slice label counts:\n" + dev["label"].value_counts().to_string())
+    return subset, dev
+
+
+def main() -> None:
+    build()
+
+
+if __name__ == "__main__":
+    main()
+===== ./src/__init__.py =====
+===== ./src/retriever/bm25_retriever.py =====
+# bm25_retriever.py
+
+import numpy as np
+from rank_bm25 import BM25Okapi
+from components.config import CHUNKS_PATH
+from utils import load_chunks, tokenize, filter_chunks_by_sections
+from section_expander import (
+    build_sections_by_disorder,
+    expansion_fetch_k,
+    finish_search,
+)
+
+
+class BM25Retriever:
+    def __init__(self, chunks=None, json_path=None, sections=None):
+        all_chunks = chunks if chunks is not None else load_chunks(json_path or CHUNKS_PATH)
+
+        self.sections: list[str] = list(sections) if sections else []
+        self.chunks = (
+            filter_chunks_by_sections(all_chunks, self.sections)
+            if self.sections
+            else all_chunks
+        )
+
+        # Tokenize using prompt_text (clean clinical text) not text
+        # (embed_text with metadata headers). embed_text contains repeated
+        # generic words like "Source", "Domain", "Disorder" which pollute BM25
+        # keyword matching and cause false positives.
+        self.tokenized_chunks = [
+            tokenize(chunk.get("prompt_text") or chunk["text"])
+            for chunk in self.chunks
+        ]
+        self.disorder_name_tokens = [
+            set(tokenize(chunk.get("disorder_name", ""))) for chunk in self.chunks
+        ]
+
+        self.bm25 = BM25Okapi(self.tokenized_chunks)
+
+        # Built lazily on first expanded search — not needed when expand=False.
+        self._sections_by_disorder: dict | None = None
+
+        print(f"BM25 retriever ready: {len(self.chunks)} chunks indexed")
+
+    def _section_map(self) -> dict:
+        if self._sections_by_disorder is None:
+            self._sections_by_disorder = build_sections_by_disorder(
+                self.chunks, self.sections
+            )
+        return self._sections_by_disorder
+
+    def _score_chunks(self, query: str, fetch_k: int) -> list[dict]:
+        """Score all chunks against *query* and return the top *fetch_k* with
+        a positive BM25 score, sorted descending."""
+        tokenized_query = tokenize(query)
+        if not tokenized_query:
+            return []
+
+        base_scores = self.bm25.get_scores(tokenized_query)
+        query_token_set = set(tokenized_query)
+        adjusted_scores = np.array(base_scores, dtype=float)
+        for idx, name_tokens in enumerate(self.disorder_name_tokens):
+            if not name_tokens:
+                continue
+            overlap = len(query_token_set & name_tokens)
+            if overlap:
+                # Small lexical prior so disorder labels matching the query are
+                # preferred over generic chunks with broad vocabulary overlap.
+                adjusted_scores[idx] += 0.75 * overlap
+
+        ranked_indices = np.argsort(adjusted_scores)[::-1]
+
+        results = []
+        seen_chunk_ids: set[str] = set()
+        for idx in ranked_indices:
+            if adjusted_scores[idx] > 0:
+                chunk = self.chunks[idx].copy()
+                chunk_id = chunk.get("id")
+                if chunk_id and chunk_id in seen_chunk_ids:
+                    continue
+                if chunk_id:
+                    seen_chunk_ids.add(chunk_id)
+                chunk["bm25_score"] = float(adjusted_scores[idx])
+                results.append(chunk)
+                if len(results) >= fetch_k:
+                    break
+        return results
+
+    def search(self, query: str, k: int = 5, *, expand: bool = True) -> list[dict]:
+        if not query or not query.strip():
+            return []
+
+        scored = self._score_chunks(query, expansion_fetch_k(k, self.sections))
+        section_map = self._section_map() if (self.sections and expand) else {}
+        return finish_search(
+            scored,
+            k,
+            self.sections,
+            section_map,
+            "bm25_score",
+            expand=expand,
+        )
+===== ./src/retriever/dense_retriever.py =====
+"""
+dense_retriever.py
+==================
+Dense retrieval over the ICD-11 ChromaDB collection.
+
+Responsibilities
+----------------
+- Initialise (or reuse) the embedding model and ChromaDB collection.
+- Low-level Chroma query helper (`search_icd11`).
+- `DenseRetriever` class with the same search interface as BM25/Hybrid
+  (optional per-section queries + post-retrieval section expansion).
+
+Public API
+----------
+    initialise_retrieval(chroma_path, collection_name, embedding_model_name)
+    search_icd11(query_text, n_results, section_filter) -> list[dict]
+    DenseRetriever(sections, json_path).search(query, k, expand=True)
+"""
+
+from __future__ import annotations
+
+from typing import Iterable, Sequence
+
+import components.ingestion as ingestion
+from components.config import CHROMA_PATH, CHUNKS_PATH, COLLECTION_NAME, EMBEDDING_MODEL
+from section_expander import (
+    build_sections_by_disorder,
+    expansion_fetch_k,
+    finish_search,
+)
+from utils import load_chunks
+
+
+def initialise_retrieval(
+    chroma_path: str = CHROMA_PATH,
+    collection_name: str = COLLECTION_NAME,
+    embedding_model_name: str = EMBEDDING_MODEL,
+) -> None:
+    import torch
+    import chromadb
+    from sentence_transformers import SentenceTransformer
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Loading embedding model on {device} …")
+    ingestion._embedding_model = SentenceTransformer(embedding_model_name, device=device)
+
+    chroma_client = chromadb.PersistentClient(path=str(chroma_path))
+    ingestion._collection = chroma_client.get_collection(collection_name)
+    print(f"Ready. Collection '{collection_name}' has {ingestion._collection.count()} vectors.")
+
+
+def _require_retrieval() -> None:
+    if ingestion._embedding_model is None or ingestion._collection is None:
+        raise RuntimeError(
+            "Retrieval not initialised. Call initialise_retrieval() or run_ingestion() first."
+        )
+
+
+def search_icd11(
+    query_text: str,
+    n_results: int = 5,
+    section_filter: str | None = None,
+) -> list[dict]:
+    """Return dense retrieval results from ChromaDB as structured chunk dicts."""
+    _require_retrieval()
+
+    query_embedding = ingestion._embedding_model.encode(
+        [query_text],
+        normalize_embeddings=True,
+    ).tolist()
+
+    where = {"section": {"$eq": section_filter}} if section_filter else None
+
+    results = ingestion._collection.query(
+        query_embeddings=query_embedding,
+        n_results=n_results,
+        where=where,
+        include=["documents", "metadatas", "distances"],
+    )
+
+    rows: list[dict] = []
+    for i in range(len(results["documents"][0])):
+        meta = results["metadatas"][0][i]
+        doc = results["documents"][0][i]
+        dist = results["distances"][0][i]
+        rows.append({
+            "id": f"{meta['disorder_code']}_{meta['section'].lower().replace(' ', '_')}",
+            "text": doc,
+            "prompt_text": doc,
+            "dense_score": 1 - dist,
+            **meta,
+        })
+    return rows
+
+
+class DenseRetriever:
+    """
+    Dense retriever backed by ChromaDB (`search_icd11`).
+
+    When *sections* is provided, each section is queried separately and results
+    are merged by chunk id (highest dense_score wins). A post-retrieval
+    expansion step then ensures every top-k disorder is represented by all
+    requested sections before returning.
+    """
+
+    def __init__(
+        self,
+        sections: Sequence[str] | None = None,
+        json_path: str | None = None,
+    ):
+        self.sections: list[str] = list(sections) if sections else []
+        self._json_path = json_path or CHUNKS_PATH
+        self._sections_by_disorder: dict | None = None
+
+    def _section_map(self) -> dict:
+        if self._sections_by_disorder is None:
+            self._sections_by_disorder = build_sections_by_disorder(
+                load_chunks(self._json_path), self.sections
+            )
+        return self._sections_by_disorder
+
+    def _iter_section_results(self, query: str, k: int) -> Iterable[dict]:
+        if not self.sections:
+            yield from search_icd11(query_text=query, n_results=k)
+            return
+        for section in self.sections:
+            yield from search_icd11(
+                query_text=query,
+                n_results=k,
+                section_filter=section,
+            )
+
+    def _deduplicate(self, rows: Iterable[dict]) -> list[dict]:
+        best: dict[str, dict] = {}
+        for row in rows:
+            cid = row["id"]
+            if cid not in best or row["dense_score"] > best[cid]["dense_score"]:
+                best[cid] = row
+        result = list(best.values())
+        result.sort(key=lambda r: r["dense_score"], reverse=True)
+        return result
+
+    def search(self, query: str, k: int = 5, *, expand: bool = True) -> list[dict]:
+        if not query or not query.strip():
+            return []
+
+        scored = self._deduplicate(
+            self._iter_section_results(query, expansion_fetch_k(k, self.sections))
+        )
+        section_map = self._section_map() if (self.sections and expand) else {}
+        return finish_search(
+            scored,
+            k,
+            self.sections,
+            section_map,
+            "dense_score",
+            expand=expand,
+        )
+===== ./src/retriever/__init__.py =====
+"""Retriever package: ICD-11 and few-shot BM25/dense/hybrid retrieval."""
+===== ./src/retriever/fewshot_retrievers.py =====
+"""
+fewshot_retrievers.py
+=====================
+Sparse, dense, and hybrid retrieval over the few-shot example store.
+
+The store is generated by `src/builders/rebuild_all_artifacts.py` and consists of:
+- JSON example exports for BM25 / hybrid lexical retrieval
+- Chroma collections for dense retrieval
+
+This module only implements retrieval. Prompt assembly policy remains separate.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+from rank_bm25 import BM25Okapi
+
+from components.config import (
+    EMBEDDING_MODEL,
+    FEWSHOT_CHROMA_PATH,
+    FEWSHOT_COLLECTION_BINARY,
+    FEWSHOT_COLLECTION_MULTICLASS,
+)
+try:
+    from utils import load_fewshot_examples, tokenize
+except ModuleNotFoundError:
+    from retriever.utils import load_fewshot_examples, tokenize
+
+RRF_K = 60
+
+_fewshot_embedding_model = None
+_fewshot_collections: dict[str, object] = {}
+
+
+def initialise_fewshot_dense_retrieval(
+    *,
+    chroma_path: str = str(FEWSHOT_CHROMA_PATH),
+    embedding_model_name: str = EMBEDDING_MODEL,
+) -> None:
+    import chromadb
+    import torch
+    from sentence_transformers import SentenceTransformer
+
+    global _fewshot_embedding_model, _fewshot_collections
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Loading few-shot embedding model on {device} ...")
+    _fewshot_embedding_model = SentenceTransformer(embedding_model_name, device=device)
+
+    client = chromadb.PersistentClient(path=str(chroma_path))
+    _fewshot_collections = {
+        "multiclass": client.get_collection(FEWSHOT_COLLECTION_MULTICLASS),
+        "binary": client.get_collection(FEWSHOT_COLLECTION_BINARY),
+    }
+    print(
+        "Few-shot collections ready:",
+        {
+            head: collection.count()
+            for head, collection in _fewshot_collections.items()
+        },
+    )
+
+
+def _require_dense(head: str) -> object:
+    if _fewshot_embedding_model is None or head not in _fewshot_collections:
+        raise RuntimeError(
+            "Few-shot dense retrieval not initialised. "
+            "Call initialise_fewshot_dense_retrieval() first."
+        )
+    return _fewshot_collections[head]
+
+
+class FewShotBM25Retriever:
+    def __init__(self, *, head: str, examples: list[dict] | None = None, json_path: str | None = None):
+        self.head = head
+        self.examples = examples if examples is not None else load_fewshot_examples(json_path, head=head)
+        self.tokenized_examples = [tokenize(example.get("post", example.get("text", ""))) for example in self.examples]
+        self.bm25 = BM25Okapi(self.tokenized_examples)
+        print(f"Few-shot BM25 retriever ready: {head} ({len(self.examples)} examples)")
+
+    def search(self, query: str, k: int = 5) -> list[dict]:
+        if not query or not query.strip():
+            return []
+
+        tokenized_query = tokenize(query)
+        if not tokenized_query:
+            return []
+
+        scores = self.bm25.get_scores(tokenized_query)
+        ranked_indices = np.argsort(scores)[::-1]
+
+        rows: list[dict] = []
+        for idx in ranked_indices:
+            if scores[idx] <= 0:
+                continue
+            row = self.examples[idx].copy()
+            row["bm25_score"] = float(scores[idx])
+            rows.append(row)
+            if len(rows) >= k:
+                break
+        return rows
+
+
+class FewShotDenseRetriever:
+    def __init__(self, *, head: str):
+        if head not in {"multiclass", "binary"}:
+            raise ValueError(f"Unsupported head: {head}")
+        self.head = head
+
+    def search(self, query: str, k: int = 5) -> list[dict]:
+        if not query or not query.strip():
+            return []
+
+        collection = _require_dense(self.head)
+        query_embedding = _fewshot_embedding_model.encode(
+            [query],
+            normalize_embeddings=True,
+        ).tolist()
+
+        results = collection.query(
+            query_embeddings=query_embedding,
+            n_results=k,
+            include=["documents", "metadatas", "distances"],
+        )
+
+        rows: list[dict] = []
+        ids = results.get("ids", [[]])[0]
+        for i in range(len(results["documents"][0])):
+            meta = results["metadatas"][0][i]
+            doc = results["documents"][0][i]
+            dist = results["distances"][0][i]
+            rows.append(
+                {
+                    "id": ids[i] if i < len(ids) else f"{self.head}_{i}",
+                    "head": meta.get("head", self.head),
+                    "label": meta["label"],
+                    "post": doc,
+                    "text": doc,
+                    "source_split": meta.get("source_split", "source"),
+                    "dense_score": 1 - dist,
+                }
+            )
+        return rows
+
+
+class FewShotHybridRetriever:
+    def __init__(
+        self,
+        *,
+        head: str,
+        examples: list[dict] | None = None,
+        json_path: str | None = None,
+        alpha: float = 0.3,
+        rrf_k: int = RRF_K,
+    ):
+        self.head = head
+        self.alpha = alpha
+        self.rrf_k = rrf_k
+        self.bm25 = FewShotBM25Retriever(head=head, examples=examples, json_path=json_path)
+        self.dense = FewShotDenseRetriever(head=head)
+
+    def _fuse(self, bm25_results: list[dict], dense_results: list[dict]) -> list[dict]:
+        bm25_ranks = {r["id"]: i + 1 for i, r in enumerate(bm25_results)}
+        dense_ranks = {r["id"]: i + 1 for i, r in enumerate(dense_results)}
+
+        row_by_id = {r["id"]: r for r in bm25_results}
+        row_by_id.update({r["id"]: r for r in dense_results})
+
+        fused: list[dict] = []
+        for row_id, row_src in row_by_id.items():
+            bm25_rank = bm25_ranks.get(row_id)
+            dense_rank = dense_ranks.get(row_id)
+
+            score = 0.0
+            if bm25_rank is not None:
+                score += self.alpha / (self.rrf_k + bm25_rank)
+            if dense_rank is not None:
+                score += (1 - self.alpha) / (self.rrf_k + dense_rank)
+
+            row = row_src.copy()
+            row["hybrid_score"] = score
+            row["score"] = score
+            row["bm25_rank"] = bm25_rank
+            row["dense_rank"] = dense_rank
+            fused.append(row)
+
+        fused.sort(key=lambda x: x["hybrid_score"], reverse=True)
+        return fused
+
+    def search(self, query: str, k: int = 5) -> list[dict]:
+        if not query or not query.strip():
+            return []
+
+        bm25_results = self.bm25.search(query, k=k)
+        dense_results = self.dense.search(query, k=k)
+        return self._fuse(bm25_results, dense_results)[:k]
+
+
+def build_fewshot_retrievers(*, head: str, alpha: float = 0.3) -> dict[str, object]:
+    examples = load_fewshot_examples(head=head)
+    return {
+        "bm25": FewShotBM25Retriever(head=head, examples=examples),
+        "dense": FewShotDenseRetriever(head=head),
+        "hybrid": FewShotHybridRetriever(head=head, examples=examples, alpha=alpha),
+    }
+
+===== ./src/retriever/utils.py =====
+import json
+import string
+from pathlib import Path
+from typing import Sequence
+
+import nltk  # type: ignore
+from nltk.corpus import stopwords  # type: ignore
+from nltk.stem import PorterStemmer  # type: ignore
+
+from components.config import (
+    CHUNKS_PATH,
+    FEWSHOT_BINARY_EXAMPLES_PATH,
+    FEWSHOT_MULTICLASS_EXAMPLES_PATH,
+    resolve_path,
+)
+
+nltk.download("punkt", quiet=True)
+nltk.download("punkt_tab", quiet=True)
+nltk.download("stopwords", quiet=True)
+
+_STEMMER = PorterStemmer()
+_STOPWORDS = set(stopwords.words("english"))
+
+
+def load_chunks(json_path: str | Path | None = None) -> list[dict]:
+    path = resolve_path(json_path, CHUNKS_PATH)
+    if not path.exists():
+        raise FileNotFoundError(f"Knowledge base file not found: {path}")
+
+    with open(path, encoding="utf-8") as f:
+        try:
+            chunks = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in knowledge base file: {e}") from e
+
+    for chunk in chunks:
+        chunk["id"] = (
+            f"{chunk.get('disorder_code', 'unknown')}_"
+            f"{chunk.get('section', 'unknown').lower().replace(' ', '_')}"
+        )
+        # Keep original short text for prompt injection.
+        chunk["prompt_text"] = chunk.get("text", "")
+        # Use richer embed_text for retrieval indexing.
+        chunk["text"] = chunk.get("embed_text") or chunk.get("prompt_text", "")
+
+    return chunks
+
+
+def load_fewshot_examples(
+    json_path: str | Path | None = None,
+    *,
+    head: str | None = None,
+) -> list[dict]:
+    """Load few-shot example rows exported by rebuild_all_artifacts.py."""
+    if json_path is None:
+        if head == "binary":
+            path = FEWSHOT_BINARY_EXAMPLES_PATH
+        else:
+            path = FEWSHOT_MULTICLASS_EXAMPLES_PATH
+    else:
+        default = FEWSHOT_BINARY_EXAMPLES_PATH if head == "binary" else FEWSHOT_MULTICLASS_EXAMPLES_PATH
+        path = resolve_path(json_path, default)
+
+    if not path.exists():
+        raise FileNotFoundError(f"Few-shot examples file not found: {path}")
+
+    with open(path, encoding="utf-8") as f:
+        try:
+            rows = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in few-shot examples file: {e}") from e
+
+    for row in rows:
+        row["text"] = row.get("text") or row.get("post", "")
+        row["post"] = row.get("post") or row.get("text", "")
+        row["id"] = row.get("id") or f"{row.get('head', head or 'fewshot')}_{row.get('label', 'unknown')}"
+    return rows
+
+
+def filter_chunks_by_sections(
+    chunks: list[dict],
+    sections: Sequence[str],
+) -> list[dict]:
+    """Return only chunks whose section is in *sections*."""
+    allowlist = set(sections)
+    return [c for c in chunks if c.get("section", "") in allowlist]
+
+
+def filter_chunks_by_disorder_codes(
+    chunks: list[dict],
+    prefixes: Sequence[str],
+) -> list[dict]:
+    """Return only chunks whose disorder_code starts with one of *prefixes*."""
+    return [
+        c for c in chunks
+        if any(str(c.get("disorder_code", "")).startswith(p) for p in prefixes)
+    ]
+
+
+def tokenize(text: str) -> list[str]:
+    """
+    BM25-friendly normalization:
+    - lowercase
+    - drop punctuation/very short tokens
+    - drop stop words (e.g. "i", "so", "and")
+    - stem to reduce sparse variants ("depressed" -> "depress")
+    """
+    tokens = nltk.word_tokenize(text.lower())
+    normalized: list[str] = []
+    for token in tokens:
+        if token in string.punctuation:
+            continue
+        if len(token) <= 2:
+            continue
+        if token in _STOPWORDS:
+            continue
+        # Keep alpha-numeric tokens that carry semantics ("icd11", "6a72").
+        stemmed = _STEMMER.stem(token)
+        if stemmed:
+            normalized.append(stemmed)
+    return normalized
+===== ./src/retriever/hybrid_retriever.py =====
+from bm25_retriever import BM25Retriever
+from dense_retriever import DenseRetriever
+from utils import load_chunks
+from components.config import CHUNKS_PATH
+from section_expander import build_sections_by_disorder, expansion_fetch_k, finish_search
+
+# Standard RRF smoothing constant (Cormack et al., 2009).
+RRF_K = 60
+
+
+class HybridRetriever:
+    """
+    Weighted Reciprocal Rank Fusion (RRF) of BM25 and dense retrieval.
+
+    Fuses ranks rather than raw scores, so BM25 and dense results can be
+    combined without score-scale calibration. Chunks ranked highly by both
+    retrievers rise to the top.
+
+    When *sections* is provided, every top-k disorder is expanded to include
+    one chunk per requested section via the shared expand_sections() utility,
+    so the LLM receives a complete clinical picture regardless of which section
+    happened to win the fusion score.
+    """
+
+    def __init__(self, chunks=None, json_path=None, alpha=0.3, sections=None, rrf_k=RRF_K):
+        """
+        Args:
+            chunks / json_path: Forwarded to BM25Retriever for sparse index.
+            alpha: BM25 weight in [0, 1]. 0 = dense only, 1 = BM25 only.
+            sections: Optional section names for post-fusion expansion.
+            rrf_k: RRF smoothing constant (default 60).
+        """
+        self.sections = list(sections) if sections else []
+        self.alpha = alpha
+        self.rrf_k = rrf_k
+
+        self.bm25 = BM25Retriever(chunks=chunks, json_path=json_path,
+                                  sections=self.sections)
+        self.dense = DenseRetriever(sections=self.sections,
+                                        json_path=json_path)
+
+        # Single section map for fusion expansion — avoids duplicating the
+        # lookup that BM25 and dense would each build independently.
+        self._sections_by_disorder = (
+            build_sections_by_disorder(
+                chunks if chunks is not None else load_chunks(json_path or CHUNKS_PATH),
+                self.sections,
+            )
+            if self.sections
+            else {}
+        )
+
+    def _fuse(
+        self,
+        bm25_results: list[dict],
+        dense_results: list[dict],
+    ) -> list[dict]:
+        """Fuse BM25 and dense candidates with weighted Reciprocal Rank Fusion."""
+        bm25_ranks = {r["id"]: i + 1 for i, r in enumerate(bm25_results)}
+        dense_ranks = {r["id"]: i + 1 for i, r in enumerate(dense_results)}
+
+        chunk_by_id = {r["id"]: r for r in bm25_results}
+        chunk_by_id.update({r["id"]: r for r in dense_results})
+
+        scored = []
+        for chunk_id, chunk_src in chunk_by_id.items():
+            bm25_rank = bm25_ranks.get(chunk_id)
+            dense_rank = dense_ranks.get(chunk_id)
+
+            hybrid_score = 0.0
+            if bm25_rank is not None:
+                hybrid_score += self.alpha / (self.rrf_k + bm25_rank)
+            if dense_rank is not None:
+                hybrid_score += (1 - self.alpha) / (self.rrf_k + dense_rank)
+
+            chunk = chunk_src.copy()
+            chunk["hybrid_score"] = hybrid_score
+            chunk["score"] = hybrid_score
+            chunk["bm25_rank"] = bm25_rank
+            chunk["dense_rank"] = dense_rank
+            scored.append(chunk)
+
+        scored.sort(key=lambda x: x["hybrid_score"], reverse=True)
+        return scored
+
+    def search(self, query: str, k: int = 5, *, expand: bool = True) -> list[dict]:
+        if not query or not query.strip():
+            return []
+
+        fetch_k = expansion_fetch_k(k, self.sections) if expand else k
+        bm25_results = self.bm25.search(query, k=fetch_k, expand=False)
+        dense_results = self.dense.search(query, k=fetch_k, expand=False)
+
+        scored = self._fuse(bm25_results, dense_results)
+        return finish_search(
+            scored,
+            k,
+            self.sections,
+            self._sections_by_disorder,
+            "hybrid_score",
+            expand=expand,
+        )
+===== ./src/retriever/section_expander.py =====
+"""
+section_expander.py
+===================
+Pure utility functions for post-retrieval section expansion.
+
+Stateless helpers: no knowledge of BM25, dense embeddings, or ChromaDB.
+Retrievers score/filter chunks, then delegate expansion here.
+
+Public API
+----------
+    build_sections_by_disorder(chunks, sections) -> dict
+    expansion_fetch_k(k, sections) -> int
+    top_k_disorder_keys(scored_chunks, k) -> list[tuple[str, str]]
+    expand_sections(...) -> list[dict]
+    finish_search(...) -> list[dict]
+"""
+from __future__ import annotations
+
+from collections import defaultdict
+from typing import Sequence
+
+
+def _chunk_uid(chunk: dict) -> str:
+    """Stable fallback id for chunk rows that do not carry an explicit 'id'."""
+    explicit = chunk.get("id", "")
+    if explicit:
+        return explicit
+    code = chunk.get("disorder_code", "")
+    name = chunk.get("disorder_name", "")
+    section = chunk.get("section", "")
+    part = chunk.get("chunk_part", 1)
+    text = chunk.get("text", "")
+    return f"{code}|{name}|{section}|{part}|{hash(text)}"
+
+
+def _section_chunk_rank(chunk: dict) -> tuple[int, int]:
+    """
+    Sort key for choosing one representative chunk per section.
+
+    Prefer chunk_part=1 (start of section), then prefer larger chunk length
+    so the representative carries richer context.
+    """
+    part = int(chunk.get("chunk_part", 1))
+    words = int(chunk.get("word_count", 0))
+    return (part, -words)
+
+
+def build_sections_by_disorder(
+    chunks: list[dict],
+    sections: Sequence[str] | None = None,
+) -> dict[tuple[str, str], dict[str, dict]]:
+    """
+    Map (disorder_code, disorder_name) -> {section -> representative_chunk}.
+
+    When section text is split into multiple sub-chunks, keep a single
+    representative chunk per section to avoid response inflation during
+    section expansion.
+    """
+    allowlist = set(sections) if sections else None
+    result: dict[tuple[str, str], dict[str, dict]] = defaultdict(dict)
+    for chunk in chunks:
+        section = chunk.get("section", "")
+        if allowlist is not None and section not in allowlist:
+            continue
+        key = (chunk.get("disorder_code", ""), chunk.get("disorder_name", ""))
+        existing = result[key].get(section)
+        if existing is None or _section_chunk_rank(chunk) < _section_chunk_rank(existing):
+            result[key][section] = chunk
+    return result
+
+
+def expansion_fetch_k(k: int, sections: Sequence[str] | None) -> int:
+    """Over-fetch multiplier so top-k distinct disorders can be found before expansion."""
+    return k * 4 if sections else k
+
+
+def top_k_disorder_keys(
+    scored_chunks: list[dict],
+    k: int,
+) -> list[tuple[str, str]]:
+    """
+    Walk *scored_chunks* (pre-sorted descending by score) and return the first
+    *k* distinct (disorder_code, disorder_name) pairs encountered.
+
+    These are the disorders whose full section sets should survive expansion —
+    any disorder that didn't rank in this set is discarded before expanding so
+    it can't inflate the result.
+    """
+    seen: set[tuple[str, str]] = set()
+    keys: list[tuple[str, str]] = []
+    for chunk in scored_chunks:
+        key = (chunk.get("disorder_code", ""), chunk.get("disorder_name", ""))
+        if key not in seen:
+            seen.add(key)
+            keys.append(key)
+        if len(keys) == k:
+            break
+    return keys
+
+
+def expand_sections(
+    scored_chunks: list[dict],
+    top_k_keys: list[tuple[str, str]],
+    sections_by_disorder: dict[tuple[str, str], dict[str, dict]],
+    score_field: str,
+    sibling_score_fn=None,
+    sections: set[str] | None = None,
+) -> list[dict]:
+    """
+    Interleave section siblings into *scored_chunks* for every disorder in
+    *top_k_keys*, without truncating mid-disorder.
+
+    Algorithm
+    ---------
+    Walk *scored_chunks* in score order. On the first encounter of a top-k
+    disorder, emit that chunk then immediately inject every sibling section
+    that isn't already present. Later chunks from the same disorder are
+    appended only if they weren't already emitted as a sibling.
+
+    Chunks belonging to disorders outside *top_k_keys* are skipped entirely.
+
+    Args:
+        scored_chunks:
+            Pre-sorted list of chunks (descending by *score_field*).
+        top_k_keys:
+            Ordered list of (disorder_code, disorder_name) pairs from
+            ``top_k_disorder_keys()``.
+        sections_by_disorder:
+            Mapping of (disorder_code, disorder_name) -> {section -> chunk}.
+            Built once at retriever init time and passed in here.
+        score_field:
+            Name of the score key on each chunk dict (e.g. "bm25_score",
+            "dense_score", "hybrid_score").
+        sibling_score_fn:
+            Optional callable(seed_chunk) -> float that computes the score
+            to assign injected siblings. Defaults to
+            ``lambda seed: seed[score_field] * 0.999``.
+        sections:
+            Optional allowlist of section names. *scored_chunks* and
+            *sections_by_disorder* should already be restricted to this set;
+            any stray rows are skipped defensively.
+
+    Returns:
+        Expanded list of chunks. No hard length cap — every requested section
+        for every top-k disorder is included.
+    """
+    if sibling_score_fn is None:
+        sibling_score_fn = lambda seed: seed[score_field] * 0.999  # noqa: E731
+
+    top_k_set = set(top_k_keys)
+    seen_ids: set[str] = set()
+    emitted_disorders: set[tuple[str, str]] = set()
+    expanded: list[dict] = []
+
+    for chunk in scored_chunks:
+        key = (chunk.get("disorder_code", ""), chunk.get("disorder_name", ""))
+
+        if key not in top_k_set:
+            continue
+
+        section_name = chunk.get("section", "")
+        if sections is not None and section_name not in sections:
+            continue
+
+        chunk_id = _chunk_uid(chunk)
+        if chunk_id in seen_ids:
+            continue
+
+        if key not in emitted_disorders:
+            # First encounter: emit seed, then inject all sibling sections.
+            emitted_disorders.add(key)
+            seen_ids.add(chunk_id)
+            expanded.append(chunk)
+
+            sibling_score = sibling_score_fn(chunk)
+            section_map = sections_by_disorder.get(key, {})
+            for section, sibling in section_map.items():
+                if section == section_name:
+                    continue
+                sibling_id = _chunk_uid(sibling)
+                if sibling_id in seen_ids:
+                    continue
+                sibling_out = sibling.copy()
+                sibling_out[score_field] = sibling_score
+                seen_ids.add(sibling_id)
+                expanded.append(sibling_out)
+        else:
+            # Later chunk from an already-emitted disorder; include only if
+            # it wasn't already injected as a sibling.
+            seen_ids.add(chunk_id)
+            expanded.append(chunk)
+
+    return expanded
+
+
+def finish_search(
+    scored: list[dict],
+    k: int,
+    sections: Sequence[str] | None,
+    sections_by_disorder: dict[tuple[str, str], dict[str, dict]],
+    score_field: str,
+    *,
+    expand: bool = True,
+) -> list[dict]:
+    """
+    Shared tail for retriever search(): optionally expand top-k disorders to
+    their full section set, otherwise return scored rows as-is.
+    """
+    if not sections or not expand:
+        # Always truncate to k. Previously, with sections set and expand=False,
+        # the full over-fetched candidate list (up to 4*k rows) was returned,
+        # so "flat" retrieval silently received 4x the requested context —
+        # invalidating any flat vs seed-and-expand comparison.
+        return scored[:k]
+
+    top_keys = top_k_disorder_keys(scored, k)
+    return expand_sections(
+        scored_chunks=scored,
+        top_k_keys=top_keys,
+        sections_by_disorder=sections_by_disorder,
+        score_field=score_field,
+        sections=set(sections),
+    )
+===== ./src/components/ingestion.py =====
+"""
+ingestion.py
+============
+Step 2 of the ICD-11 knowledge base pipeline.
+
+Responsibilities
+----------------
+- Load chunk JSON produced by chunker.py.
+- Embed each chunk with BioLORD-2023 (via sentence-transformers).
+- Upsert embeddings into a persistent ChromaDB collection.
+- Expose the populated _embedding_model and _collection handles for
+  use by dense_retriever.py without re-loading.
+
+Public API
+----------
+    run_ingestion(chunks_path, chroma_path, collection_name,
+                  embedding_model_name, batch_size, rebuild) -> None
+"""
+
+from __future__ import annotations
+
+import json
+
+try:
+    from config import (        # when run directly: python src/components/ingestion.py
+        BATCH_SIZE, CHUNKS_PATH, CHROMA_PATH, COLLECTION_NAME, EMBEDDING_MODEL,
+    )
+except ModuleNotFoundError:
+    from components.config import (   # when imported as a package (src on sys.path)
+        BATCH_SIZE, CHUNKS_PATH, CHROMA_PATH, COLLECTION_NAME, EMBEDDING_MODEL,
+    )
+
+# Module-level handles — populated by run_ingestion() or initialise_retrieval()
+# (imported and mutated by dense_retriever.py as needed)
+_embedding_model = None
+_collection      = None
+
+
+def run_ingestion(
+    chunks_path: str          = CHUNKS_PATH,
+    chroma_path: str          = CHROMA_PATH,
+    collection_name: str      = COLLECTION_NAME,
+    embedding_model_name: str = EMBEDDING_MODEL,
+    batch_size: int           = BATCH_SIZE,
+    rebuild: bool             = False,
+) -> None:
+    """
+    Embed each chunk with BioLORD-2023 and upsert into a ChromaDB collection.
+
+    Args:
+        chunks_path          : path to the JSON produced by run_chunking().
+        chroma_path          : directory for the persistent ChromaDB store.
+        collection_name      : name of the ChromaDB collection to create/use.
+        embedding_model_name : HuggingFace model ID for sentence-transformers.
+        batch_size           : number of chunks to embed per forward pass.
+        rebuild              : if True, wipe and re-ingest an existing collection.
+    """
+    import torch
+    import chromadb
+    from sentence_transformers import SentenceTransformer
+    from tqdm import tqdm
+
+    global _embedding_model, _collection
+
+    # ── Device ────────────────────────────────────────────────────────────────
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        print(f"GPU : {torch.cuda.get_device_name(0)}")
+        print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+    else:
+        print("No GPU detected — using CPU")
+
+    # ── Load embedding model ──────────────────────────────────────────────────
+    print(f"\nLoading: {embedding_model_name} …")
+    _embedding_model = SentenceTransformer(embedding_model_name, device=device)
+    _embedding_model.max_seq_length = 512   # default 128 — truncates chunks and queries
+    print(f"Max seq length: {_embedding_model.max_seq_length}")
+    print(f"Loaded on  : {_embedding_model.device}")
+    print(f"Output dims: {_embedding_model.get_sentence_embedding_dimension()}")
+
+    # ── ChromaDB client ───────────────────────────────────────────────────────
+    chroma_client = chromadb.PersistentClient(path=str(chroma_path))
+    print(f"\nChromaDB path: {chroma_path}")
+
+    existing_names = [c.name for c in chroma_client.list_collections()]
+    if collection_name in existing_names:
+        count = chroma_client.get_collection(collection_name).count()
+        print(f"Collection '{collection_name}' already exists with {count} vectors.")
+        if rebuild:
+            chroma_client.delete_collection(collection_name)
+            print("Deleted existing collection (rebuild=True).")
+        else:
+            print("Skipping ingestion. Pass rebuild=True to re-ingest.")
+            _collection = chroma_client.get_collection(collection_name)
+            return
+
+    _collection = chroma_client.get_or_create_collection(
+        name=collection_name,
+        metadata={"hnsw:space": "cosine"},
+    )
+    print(f"Collection ready: '{collection_name}'  ({_collection.count()} vectors)")
+
+    # ── Load chunks ───────────────────────────────────────────────────────────
+    with open(str(chunks_path), "r", encoding="utf-8") as f:
+        chunks = json.load(f)
+    print(f"Loaded {len(chunks)} chunks from {chunks_path}")
+
+    if _collection.count() == len(chunks):
+        print("Collection already fully ingested. Skipping.")
+        return
+
+    print(f"\nIngesting {len(chunks)} chunks into '{collection_name}' …\n")
+
+    for i in tqdm(range(0, len(chunks), batch_size), desc="Batches"):
+        batch = chunks[i : i + batch_size]
+
+        texts_to_embed = [c["embed_text"] for c in batch]
+
+        ids = [
+            f"{c['disorder_code']}_{c['section'].replace(' ', '_').replace('/', '_')}_{i + j}"
+            for j, c in enumerate(batch)
+        ]
+
+        metadatas = [
+            {
+                "domain":        c["domain"],
+                "disorder_code": c["disorder_code"],
+                "disorder_name": c["disorder_name"],
+                "section":       c["section"],
+                "word_count":    c["word_count"],
+            }
+            for c in batch
+        ]
+
+        documents = [c["text"] for c in batch]
+
+        embeddings = _embedding_model.encode(
+            texts_to_embed,
+            batch_size=batch_size,
+            show_progress_bar=False,
+            normalize_embeddings=True,
+        ).tolist()
+
+        _collection.add(
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+        )
+
+    print(f"\nDone. Collection '{collection_name}' now has {_collection.count()} vectors.")===== ./src/components/config.py =====
+"""
+config.py
+=========
+Shared configuration and project paths for the ICD-11 knowledge base pipeline.
+
+All filesystem paths are resolved relative to PROJECT_ROOT (the repo root),
+so imports work whether you run from the project root, src/, or notebooks/.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+# Repo root: src/components/config.py -> parents[0]=components, [1]=src, [2]=repo.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def project_path(*parts: str) -> Path:
+    """Build an absolute path under the project root."""
+    return PROJECT_ROOT.joinpath(*parts)
+
+
+def resolve_path(path: str | Path | None = None, default: Path | None = None) -> Path:
+    """
+    Resolve a path against PROJECT_ROOT when it is not already absolute.
+
+    If path is None, default must be provided.
+    """
+    chosen = Path(path) if path is not None else default
+    if chosen is None:
+        raise ValueError("No path provided")
+    return chosen if chosen.is_absolute() else PROJECT_ROOT / chosen
+
+
+# ── Model / collection ─────────────────────────────────────────────────────────
+COLLECTION_NAME = "icd11_clinical"
+EMBEDDING_MODEL = "FremyCompany/BioLORD-2023"
+BATCH_SIZE = 64
+
+# ── Paths ──────────────────────────────────────────────────────────────────────
+
+ICD11_STORE_DIR = project_path("knowledge_base", "icd_11")
+PDF_PATH = ICD11_STORE_DIR / "icd_11.pdf"
+CHUNKS_PATH = ICD11_STORE_DIR / "icd11_chunks.json"
+CHROMA_PATH = ICD11_STORE_DIR / "chroma_db"
+
+RAW_DATASETS_DIR = project_path("datasets", "raw")
+PROCESSED_DATASETS_DIR = project_path("datasets", "processed")
+RESULTS_DIR = project_path("results")
+
+# Hugging Face mental-health corpus (local cache + Hub fallback).
+HF_DATASET_REPO = "ourafla/Mental-Health_Text-Classification_Dataset"
+HF_TRAIN_FILE = "mental_health_train.csv"
+HF_TEST_FILE = "mental_health_test.csv"
+DATASET_TRAIN_PATH = RAW_DATASETS_DIR / HF_TRAIN_FILE
+DATASET_TEST_PATH = RAW_DATASETS_DIR / HF_TEST_FILE
+
+# Stratified multiclass evaluation set (committed; regenerate via src/builders/build_multiclass_dataset.py).
+MULTICLASS_EVAL_PATH = PROCESSED_DATASETS_DIR / "multiclass_eval.csv"
+MULTICLASS_EVAL_META_PATH = PROCESSED_DATASETS_DIR / "multiclass_eval.meta.json"
+MULTICLASS_LABELS: tuple[str, ...] = ("suicidal", "depression", "normal")
+MULTICLASS_EXCLUDE: tuple[str, ...] = ("anxiety",)
+MULTICLASS_EVAL_PER_CLASS = 150
+MULTICLASS_EVAL_SEED = 42
+MULTICLASS_MIN_CHARS = 40
+MULTICLASS_MAX_CHARS = 2000
+
+# Stratified development slice for prompt/k tuning.
+MULTICLASS_DEV_PATH = PROCESSED_DATASETS_DIR / "multiclass_dev.csv"
+MULTICLASS_DEV_META_PATH = PROCESSED_DATASETS_DIR / "multiclass_dev.meta.json"
+MULTICLASS_DEV_PER_CLASS = 10
+MULTICLASS_DEV_SEED = 43
+
+# Backward-compatible aliases used by current scripts/notebooks.
+RAG_EVAL_SUBSET_PATH = MULTICLASS_EVAL_PATH
+RAG_EVAL_META_PATH = MULTICLASS_EVAL_META_PATH
+RAG_EVAL_LABELS = MULTICLASS_LABELS
+RAG_EVAL_EXCLUDE = MULTICLASS_EXCLUDE
+RAG_EVAL_PER_CLASS = MULTICLASS_EVAL_PER_CLASS
+RAG_EVAL_SEED = MULTICLASS_EVAL_SEED
+RAG_EVAL_MIN_CHARS = MULTICLASS_MIN_CHARS
+RAG_EVAL_MAX_CHARS = MULTICLASS_MAX_CHARS
+RAG_DEV_SLICE_PATH = MULTICLASS_DEV_PATH
+RAG_DEV_META_PATH = MULTICLASS_DEV_META_PATH
+RAG_DEV_PER_CLASS = MULTICLASS_DEV_PER_CLASS
+RAG_DEV_SEED = MULTICLASS_DEV_SEED
+DATASET_PATH = MULTICLASS_EVAL_PATH
+
+# ── Binary suicide classification (raw source + derived eval/dev) ─────────────
+BINARY_SOURCE_PATH = RAW_DATASETS_DIR / "suicide_detection_raw.csv"
+BINARY_EVAL_PATH = PROCESSED_DATASETS_DIR / "binary_suicide_eval.csv"
+BINARY_EVAL_META_PATH = PROCESSED_DATASETS_DIR / "binary_suicide_eval.meta.json"
+BINARY_DEV_PATH = PROCESSED_DATASETS_DIR / "binary_suicide_dev.csv"
+BINARY_DEV_META_PATH = PROCESSED_DATASETS_DIR / "binary_suicide_dev.meta.json"
+BINARY_LABELS: tuple[str, ...] = ("suicide", "non-suicide")
+BINARY_EVAL_PER_CLASS = 150
+BINARY_EVAL_SEED = 42
+BINARY_DEV_PER_CLASS = 10
+BINARY_DEV_SEED = 43
+BINARY_MIN_CHARS = 40
+BINARY_MAX_CHARS = 2000
+
+# Backward-compatible aliases.
+BINARY_EVAL_SUBSET_PATH = BINARY_EVAL_PATH
+BINARY_DEV_SLICE_PATH = BINARY_DEV_PATH
+BINARY_DATASET_PATH = BINARY_EVAL_PATH
+
+# Experiment run outputs (RAG predictions, summaries, error analysis).
+MULTICLASS_RESULTS_FINAL_PATH = RESULTS_DIR / "multiclass_rag_results.csv"
+MULTICLASS_RESULTS_SUMMARY_PATH = RESULTS_DIR / "multiclass_summary.csv"
+MULTICLASS_ERROR_ANALYSIS_PATH = RESULTS_DIR / "multiclass_error_analysis.csv"
+BINARY_RESULTS_FINAL_PATH = RESULTS_DIR / "binary_rag_results.csv"
+BINARY_RESULTS_SUMMARY_PATH = RESULTS_DIR / "binary_summary.csv"
+BINARY_ERROR_ANALYSIS_PATH = RESULTS_DIR / "binary_error_analysis.csv"
+
+# Backward-compatible aliases.
+RAG_RESULTS_FINAL_PATH = MULTICLASS_RESULTS_FINAL_PATH
+RAG_RESULTS_SUMMARY_PATH = MULTICLASS_RESULTS_SUMMARY_PATH
+RAG_ERROR_ANALYSIS_PATH = MULTICLASS_ERROR_ANALYSIS_PATH
+
+# ── Few-shot vector store (blueprint: planned) ────────────────────────────────
+# This store is built from the raw datasets (multiclass + binary) and can be
+# queried later to assemble dynamic few-shot prompts.
+FEWSHOT_STORE_DIR = project_path("knowledge_base", "fewshot")
+FEWSHOT_CHROMA_PATH = FEWSHOT_STORE_DIR / "chroma_db"
+FEWSHOT_MULTICLASS_EXAMPLES_PATH = FEWSHOT_STORE_DIR / "multiclass_examples.json"
+FEWSHOT_BINARY_EXAMPLES_PATH = FEWSHOT_STORE_DIR / "binary_examples.json"
+FEWSHOT_DB_META_PATH = PROCESSED_DATASETS_DIR / "fewshot_db.meta.json"
+
+FEWSHOT_COLLECTION_MULTICLASS = "fewshot_multiclass"
+FEWSHOT_COLLECTION_BINARY = "fewshot_binary"
+
+# Deterministic per-label sampling caps (keeps the store size reasonable).
+FEWSHOT_MULTICLASS_MAX_PER_LABEL = 200
+FEWSHOT_BINARY_MAX_PER_CLASS = 200
+FEWSHOT_BUILD_SEED = 1337
+
+# Embedding model + performance knobs (reuses the same ICD-11 embedding model).
+FEWSHOT_EMBEDDING_MAX_SEQ_LENGTH = 512
+FEWSHOT_EMBED_BATCH_SIZE = BATCH_SIZE
+
+# ── PDF page range (pdftotext page numbers; printed page ≈ PDF − 18) ──────────
+# Clinical CDDR starts at Neurodevelopmental intro / 6A00 (not List of categories).
+# End after secondary syndromes (6E6Z); MB symptom appendix begins ~PDF 695.
+CONTENT_START_PAGE = 109
+CONTENT_END_PAGE   = 694
+
+# Flag disorders with more than this many chunks in the post-chunking report.
+CHUNK_COUNT_WARNING_THRESHOLD = 30
+
+# ── ICD-11 code prefix → clinical domain (aligned to CDDR TOC groupings) ──────
+# Longer / more specific prefixes must appear before shorter overlapping ones
+# when both could match; current keys are disjoint at the 3-char prefix level.
+DOMAIN_MAP: dict[str, str] = {
+    "6A0": "Neurodevelopmental disorders",
+    "6A2": "Schizophrenia and other primary psychotic disorders",
+    "6A4": "Catatonia",
+    "6A6": "Mood disorders",
+    "6A7": "Mood disorders",
+    "6A8": "Mood disorders",
+    "6B0": "Anxiety and fear-related disorders",
+    "6B2": "Obsessive-compulsive and related disorders",
+    "6B4": "Disorders specifically associated with stress",
+    "6B6": "Dissociative disorders",
+    "6B8": "Feeding and eating disorders",
+    "6C0": "Elimination disorders",
+    "6C2": "Disorders of bodily distress or experience",
+    "6C4": "Disorders due to substance use or addictive behaviours",
+    "6C5": "Disorders due to substance use or addictive behaviours",
+    "6C7": "Impulse control disorders",
+    "6C9": "Disruptive behaviour and dissocial disorders",
+    "6D1": "Personality disorders",
+    "6D3": "Paraphilic disorders",
+    "6D5": "Factitious disorders",
+    "6D7": "Neurocognitive disorders",
+    "6D8": "Neurocognitive disorders",
+    "6E0": "Mental or behavioural disorders associated with pregnancy, childbirth or puerperium",
+    "6E2": "Psychological and behavioural factors affecting health conditions",
+    "6E4": "Secondary mental or behavioural syndromes",
+    "6E6": "Secondary mental or behavioural syndromes",
+    # Secondary-parented / cross-listed clinical entries in the CDDR
+    "8A0": "Neurodevelopmental disorders",  # primary tics / Tourette (Chapter 8)
+    "GA3": "Mood disorders",                # Premenstrual dysphoric disorder
+}
+
+# ── Retrieval section allowlist ───────────────────────────────────────────────
+# Canonical section names passed to retrievers and section_expander. Must match
+# the normalised values produced by chunker.normalise_section().
+RETRIEVAL_SECTIONS: list[str] = [
+    "Essential Features",
+    "Boundary with Normality",
+]
+
+# ICD-11 disorder-code prefixes for mood / depressive disorders (6A6–6A8).
+# Used by the RAG risk-detection notebook to avoid retrieving unrelated domains.
+MOOD_DISORDER_PREFIXES: tuple[str, ...] = ("6A6", "6A7", "6A8")
+
+# ── Section heading normalisation map ─────────────────────────────────────────
+SECTION_NORMALISE_MAP: dict[str, str] = {
+    "essential (required) features":                                           "Essential Features",
+    "essential features":                                                      "Essential Features",
+    "additional clinical features":                                            "Additional Clinical Features",
+    "boundary with normality":                                                 "Boundary with Normality",
+    "boundary with normality (threshold)":                                     "Boundary with Normality",
+    "course features":                                                         "Course Features",
+    "developmental presentations":                                           "Developmental Presentations",
+    "culture-related features":                                                "Culture-Related Features",
+    "sex- and/or gender-related features":                                     "Sex- and/or Gender-Related Features",
+    "boundaries with other disorders and conditions":                          "Differential Diagnosis",
+    "boundaries with other disorders and conditions (differential diagnosis)": "Differential Diagnosis",
+    "boundaries with other disorders and conditions (differential":            "Differential Diagnosis",
+    "diagnostic requirements":                                                 "Diagnostic Requirements",
+    "specifiers":                                                              "Specifiers",
+}
+===== ./src/components/chunker.py =====
+"""
+chunker.py
+==========
+Step 1 of the ICD-11 knowledge base pipeline.
+
+Responsibilities
+----------------
+- Extract a page range from the ICD-11 CDDR PDF via pdftotext.
+- Parse the raw text into structured chunk dicts (one per disorder section).
+- Post-process chunks: merge near-empty consecutive chunks, add embed_text.
+- Save the final chunks to JSON.
+
+Public API
+----------
+    run_chunking(pdf_path, chunks_path, start_page, end_page) -> list[dict]
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+try:
+    from config import (        # when run directly: python src/components/chunker.py
+        CHUNK_COUNT_WARNING_THRESHOLD,
+        CONTENT_END_PAGE,
+        CONTENT_START_PAGE,
+        CHUNKS_PATH,
+        PDF_PATH,
+        DOMAIN_MAP,
+        SECTION_NORMALISE_MAP,
+    )
+except ModuleNotFoundError:
+    from components.config import (   # when imported as a package (src on sys.path)
+        CHUNK_COUNT_WARNING_THRESHOLD,
+        CONTENT_END_PAGE,
+        CONTENT_START_PAGE,
+        CHUNKS_PATH,
+        PDF_PATH,
+        DOMAIN_MAP,
+        SECTION_NORMALISE_MAP,
+    )
+
+# Max-size guardrails so section-based chunks do not become too large.
+MAX_CHUNK_WORDS = 220
+CHUNK_WORD_OVERLAP = 35
+
+# ── Compiled regex patterns ────────────────────────────────────────────────────
+_SECTION_PATTERNS = [
+    r"Essential \(required\) features",
+    r"Essential features",
+    r"Additional clinical features",
+    r"Boundary with normality",
+    r"Boundary with normality \(threshold\)",
+    r"Course features",
+    r"Developmental presentations",
+    r"Culture-related features",
+    r"Sex- and/or gender-related features",
+    # Full heading, unwrapped short form, and layout-wrapped "(differential" line.
+    r"Boundaries with other disorders and conditions \(differential diagnosis\)",
+    r"Boundaries with other disorders and conditions \(differential",
+    r"Boundaries with other disorders and conditions",
+    r"General diagnostic requirements(?: for .+)?",
+    r"Diagnostic requirements",
+    r"Specifiers",
+    r"Coded elsewhere",
+    r"Note:",
+]
+
+SECTION_RE = re.compile(
+    r"^(" + "|".join(_SECTION_PATTERNS) + r")\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Chapter 6 CDDR codes, plus cross-listed 8A (tics) and GA (e.g. PMDD) entries.
+DISORDER_CODE_RE = re.compile(
+    r"^((?:6[A-Z0-9]{2,5}|8A\d{2}|GA\d{2})(?:\.[A-Z0-9]{1,3})?)\s{2,}(.+)$",
+    re.MULTILINE,
+)
+
+# Continuation of a layout-wrapped differential-diagnosis heading.
+DIFF_HEADING_CONTINUATION_RE = re.compile(
+    r"^diagnosis\)(?:\s|$)",
+    re.IGNORECASE,
+)
+
+# Stop parsing when appendix / index material begins (not clinical CDDR entries).
+APPENDIX_STOP_RE = re.compile(
+    r"(?:"
+    # Full phrase, or line-wrapped form ending at "include the"
+    r"Mental or behavioural symptoms, signs or clinical findings include the(?:\s+following)?"
+    r"|Mental or behavioural symptoms, signs or clinical findings\s+\d{2,3}\s*$"
+    r"|Relationship problems and maltreatment as factors influencing health status"
+    r"|^Acknowledgements?\b"
+    r"|^Site directors?:"
+    r"|^Other contributors?:"
+    r"|^MB\d{2}(?:\.[A-Z0-9]+)?\s+Symptoms"
+    r"|^QA\d{2}"
+    r")",
+    re.IGNORECASE,
+)
+
+CHAPTER_INDEX_RE = re.compile(r"\bList of categories\b", re.IGNORECASE)
+ICD10_CROSSWALK_RE = re.compile(r"\bF\d{2}(?:\.\d+)?\b")
+MB_SYMPTOM_CODE_RE = re.compile(r"\bMB\d{2}(?:\.[A-Z0-9]+)?\b")
+INLINE_DISORDER_CODE_RE = re.compile(
+    r"\b(?:6[A-Z0-9]{2,5}|8A\d{2}|GA\d{2})(?:\.[A-Z0-9]{1,3})?\b"
+)
+NON_CDDR_CODE_RE = re.compile(r"\b(?:QA|PJ|QE|MB|F)\d", re.IGNORECASE)
+PAGE_HEADER_BLEED_RE = re.compile(
+    r"\b\d{2,3}\s+Clinical Descriptions and Diagnostic Requirements\b",
+    re.IGNORECASE,
+)
+
+_CHAPTER_BOILERPLATE_MARKERS = (
+    "neurodevelopmental disorders include the following",
+    "many mental and behavioural disorders that can arise during the developmental period",
+    "mental, behavioural and neurodevelopmental disorders are syndromes",
+    "mental or behavioural symptoms, signs or clinical findings",
+    "schizophrenia and other primary psychotic disorders include",
+    "mood disorders include the following",
+    "anxiety and fear-related disorders include",
+    "relationship problems and maltreatment as factors influencing health status",
+    "examination or observation for suspected",
+    "intimate partner physical abuse",
+    "caregiver-child relationship",
+    "caregiver\u2013child relationship",
+    "child maltreatment",
+    "crosswalk from icd-11",
+    "boundary with spouse or partner",
+    "intimate partner",
+    "spouse or partner",
+    "child sexual abuse",
+    "child neglect",
+    "relationship distress with",
+    "significantly affect physical, mental and social well-being",
+)
+
+
+# ── Helper functions ───────────────────────────────────────────────────────────
+
+def get_domain(code: str) -> str:
+    """Return the clinical domain for an ICD-11 code prefix."""
+    for prefix, domain in DOMAIN_MAP.items():
+        if code.startswith(prefix):
+            return domain
+    return "Other / Unclassified"
+
+
+def normalise_section(heading: str) -> str:
+    """Standardise a raw section heading string."""
+    key = heading.strip().lower()
+    if key in SECTION_NORMALISE_MAP:
+        return SECTION_NORMALISE_MAP[key]
+    # Prefix fallbacks for headings that vary by disorder name or wrap in layout.
+    if key.startswith("general diagnostic requirements"):
+        return "Diagnostic Requirements"
+    if key.startswith("boundaries with other disorders and conditions"):
+        return "Differential Diagnosis"
+    return heading.strip()
+
+
+def is_appendix_boundary(line: str) -> bool:
+    """Return True when a line marks the start of non-clinical appendix content."""
+    return bool(APPENDIX_STOP_RE.search(line))
+
+
+def is_index_bleed_chunk(text: str, section: str) -> bool:
+    """Drop chapter-index pages that were mis-attributed to a disorder."""
+    return section == "Overview" and CHAPTER_INDEX_RE.search(text) is not None
+
+
+def is_misattributed_6E6Z_chunk(chunk: dict) -> bool:
+    """
+    Drop chunks wrongly accumulated under 6E6Z during chapter/index boundaries.
+
+    6E6Z is the last disorder in its chapter; appendix and chapter-intro pages are
+    often mis-attributed to it when no new disorder-code line is detected.
+    """
+    if chunk.get("disorder_code") != "6E6Z":
+        return False
+
+    text = chunk.get("text", "")
+    text_lower = text.lower()
+    if "secondary" not in text_lower:
+        if (
+            chunk.get("section") == "Overview"
+            and "unspecified" in text_lower
+            and len(text.split()) <= 80
+            and CHAPTER_INDEX_RE.search(text) is None
+            and not any(marker in text_lower for marker in _CHAPTER_BOILERPLATE_MARKERS)
+        ):
+            return False
+        return True
+
+    if any(marker in text_lower for marker in _CHAPTER_BOILERPLATE_MARKERS):
+        return True
+
+    inline_codes = set(INLINE_DISORDER_CODE_RE.findall(text))
+    inline_codes.discard("6E6Z")
+    if len(inline_codes) >= 3:
+        return True
+
+    if NON_CDDR_CODE_RE.search(text) or PAGE_HEADER_BLEED_RE.search(text):
+        return True
+
+    section = chunk.get("section", "")
+    if section == "Diagnostic Requirements" and ICD10_CROSSWALK_RE.search(text):
+        return True
+
+    return False
+
+
+def is_junk_chunk(chunk: dict) -> bool:
+    """
+    Drop appendix tables, ICD-10 crosswalk rows, and contributor lists that
+    slipped through line-based parsing.
+    """
+    text = chunk.get("text", "")
+    section = chunk.get("section", "")
+
+    if is_index_bleed_chunk(text, section):
+        return True
+    if is_misattributed_6E6Z_chunk(chunk):
+        return True
+    if chunk.get("disorder_code") == "6E6Z" and NON_CDDR_CODE_RE.search(text):
+        return True
+    if APPENDIX_STOP_RE.search(text):
+        return True
+    if MB_SYMPTOM_CODE_RE.search(text):
+        return True
+    if ICD10_CROSSWALK_RE.findall(text) and len(ICD10_CROSSWALK_RE.findall(text)) >= 3:
+        return True
+    if re.search(
+        r"\b(?:National coordinator|Site coordinators?|Site directors?|Other contributors?)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return True
+    if re.search(r",\s*Chair\b", text):
+        return True
+    return False
+
+
+def filter_junk_chunks(chunks: list[dict]) -> list[dict]:
+    """Remove non-clinical chunks produced by PDF layout edge cases."""
+    kept = [c for c in chunks if not is_junk_chunk(c)]
+    dropped = len(chunks) - len(kept)
+    if dropped:
+        print(f"  Dropped {dropped} junk/appendix chunks")
+    return kept
+
+
+def print_validation_report(
+    chunks: list[dict],
+    warn_threshold: int = CHUNK_COUNT_WARNING_THRESHOLD,
+) -> None:
+    """Print chunk distribution stats and flag suspicious disorder counts."""
+    from collections import Counter
+
+    by_disorder = Counter(c["disorder_code"] for c in chunks)
+    names = {c["disorder_code"]: c["disorder_name"] for c in chunks}
+
+    print("\nTop disorders by chunk count:")
+    for code, count in by_disorder.most_common(10):
+        print(f"  {count:>4}  {code}  {names[code][:55]}")
+
+    flagged = sorted(
+        ((code, count) for code, count in by_disorder.items() if count > warn_threshold),
+        key=lambda item: -item[1],
+    )
+    if flagged:
+        print(f"\nWarning: disorders with >{warn_threshold} chunks:")
+        for code, count in flagged:
+            print(f"  {count:>4}  {code}  {names[code][:55]}")
+
+
+def clean_line(line: str) -> str:
+    """Strip page headers, footers, and standalone page numbers."""
+    line = line.strip()
+    line = re.sub(
+        r"^(Clinical Descriptions and Diagnostic Requirements for ICD-11 Mental.*|"
+        r"Schizophrenia and other primary psychotic disorders \|.*|"
+        r"[A-Z][a-z]+ (disorders?|syndrome|behaviour) \| .+)$",
+        "", line, flags=re.IGNORECASE,
+    )
+    line = re.sub(r"^\d{1,4}\s*$", "", line)
+    return line.strip()
+
+
+def extract_text_range(pdf_path: str, first: int, last: int) -> str:
+    """
+    Call pdftotext to extract a page range from the PDF.
+
+    Searches PATH first; falls back to the active conda environment.
+    Raises FileNotFoundError if pdftotext cannot be located.
+    """
+    import os
+
+    pdftotext_cmd = shutil.which("pdftotext")
+
+    if pdftotext_cmd is None:
+        conda_env = Path(os.environ.get("CONDA_PREFIX", ""))
+        candidates = [
+            conda_env / "Library" / "bin" / "pdftotext.exe",
+            conda_env / "bin" / "pdftotext",
+        ]
+        for c in candidates:
+            if c.exists():
+                pdftotext_cmd = str(c)
+                break
+
+    if pdftotext_cmd is None:
+        raise FileNotFoundError(
+            "pdftotext not found. Install via: conda install -c conda-forge poppler"
+        )
+
+    abs_path = str(Path(pdf_path).resolve())
+    print(f"pdftotext     : {pdftotext_cmd}")
+    print(f"PDF path      : {abs_path}")
+    print(f"File exists   : {Path(abs_path).exists()}")
+
+    result = subprocess.run(
+        [pdftotext_cmd, "-f", str(first), "-l", str(last), "-layout", abs_path, "-"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    if result.returncode != 0:
+        print(f"pdftotext error: {result.stderr}")
+
+    return result.stdout
+
+
+def chunk_text(full_text: str) -> list[dict]:
+    """
+    Parse raw PDF text into a list of structured chunk dicts.
+
+    Each chunk represents one named section of one ICD-11 disorder entry,
+    e.g. {'disorder_code': '6A70', 'section': 'Essential Features', ...}.
+    """
+    lines = full_text.split("\n")
+    chunks: list[dict] = []
+    current_disorder_code: str | None = None
+    current_disorder_name: str | None = None
+    current_section: str | None       = None
+    current_lines: list[str]          = []
+    current_domain                    = "Unclassified"
+
+    def flush() -> None:
+        nonlocal current_lines
+        if not current_disorder_code or not current_section:
+            current_lines = []
+            return
+        text = " ".join(l for l in current_lines if l).strip()
+        text = re.sub(r"\s{2,}", " ", text)
+        if (
+            len(text.split()) < 20
+            or is_index_bleed_chunk(text, current_section)
+            or (
+                current_disorder_code == "6E6Z"
+                and is_misattributed_6E6Z_chunk({
+                    "disorder_code": current_disorder_code,
+                    "section": current_section,
+                    "text": text,
+                })
+            )
+        ):
+            current_lines = []
+            return
+        chunks.append({
+            "source":        "ICD-11 CDDR",
+            "domain":        current_domain,
+            "disorder_code": current_disorder_code,
+            "disorder_name": current_disorder_name,
+            "section":       current_section,
+            "text":          text,
+            "word_count":    len(text.split()),
+        })
+        current_lines = []
+
+    for line in lines:
+        cleaned = clean_line(line)
+        if not cleaned:
+            continue
+
+        if is_appendix_boundary(cleaned):
+            flush()
+            break
+
+        if CHAPTER_INDEX_RE.search(cleaned):
+            current_lines = []
+            current_disorder_code = None
+            current_disorder_name = None
+            current_section = None
+            continue
+
+        code_match = DISORDER_CODE_RE.match(cleaned)
+        if code_match:
+            flush()
+            current_disorder_code = code_match.group(1)
+            current_disorder_name = code_match.group(2).strip()
+            current_domain        = get_domain(current_disorder_code)
+            current_section       = "Overview"
+            current_lines         = [current_disorder_name]
+            continue
+
+        # Skip second half of a layout-wrapped differential-diagnosis heading.
+        if DIFF_HEADING_CONTINUATION_RE.match(cleaned):
+            continue
+
+        sec_match = SECTION_RE.match(cleaned)
+        if sec_match:
+            flush()
+            current_section = normalise_section(sec_match.group(1))
+            continue
+
+        current_lines.append(cleaned)
+
+    flush()
+    return chunks
+
+
+def build_embed_text(chunk: dict) -> str:
+    """
+    Prepend structured metadata to the clinical text before embedding.
+
+    Baking disorder + section context into the embedding means the model
+    encodes clinical structure, not just raw surface text.
+    """
+    return (
+        f"Source: {chunk['source']}\n"
+        f"Domain: {chunk['domain']}\n"
+        f"Disorder: {chunk['disorder_name']} ({chunk['disorder_code']})\n"
+        f"Section: {chunk['section']}\n\n"
+        f"{chunk['text']}"
+    )
+
+
+def split_long_chunks(
+    chunks: list[dict],
+    max_words: int = MAX_CHUNK_WORDS,
+    overlap_words: int = CHUNK_WORD_OVERLAP,
+) -> list[dict]:
+    """
+    Split oversized chunks with a sliding-word window while preserving metadata.
+
+    This keeps section-level semantics but prevents very long sections from
+    becoming single huge embeddings.
+    """
+    if max_words <= 0:
+        return chunks
+    if overlap_words < 0:
+        overlap_words = 0
+    if overlap_words >= max_words:
+        overlap_words = max_words - 1
+
+    split_chunks: list[dict] = []
+    for chunk in chunks:
+        words = chunk["text"].split()
+        if len(words) <= max_words:
+            split_chunks.append(chunk)
+            continue
+
+        step = max_words - overlap_words
+        part = 1
+        for start in range(0, len(words), step):
+            window = words[start : start + max_words]
+            if not window:
+                break
+            sub = dict(chunk)
+            sub["text"] = " ".join(window)
+            sub["word_count"] = len(window)
+            sub["chunk_part"] = part
+            split_chunks.append(sub)
+            part += 1
+            if start + max_words >= len(words):
+                break
+    return split_chunks
+
+
+def postprocess(
+    chunks: list[dict],
+    min_words: int = 40,
+    max_words: int = MAX_CHUNK_WORDS,
+    overlap_words: int = CHUNK_WORD_OVERLAP,
+) -> list[dict]:
+    """
+    Merge consecutive near-empty chunks from the same disorder/section.
+
+    Also splits oversized chunks and adds the 'embed_text' field to every chunk.
+    """
+    merged: list[dict] = []
+    i = 0
+    while i < len(chunks):
+        c = chunks[i]
+        while (
+            c["word_count"] < min_words
+            and i + 1 < len(chunks)
+            and chunks[i + 1]["disorder_code"] == c["disorder_code"]
+            and chunks[i + 1]["section"]       == c["section"]
+        ):
+            i += 1
+            c = dict(c)
+            c["text"]       = c["text"] + " " + chunks[i]["text"]
+            c["word_count"] = len(c["text"].split())
+        c["embed_text"] = build_embed_text(c)
+        merged.append(c)
+        i += 1
+
+    final_chunks = split_long_chunks(
+        merged,
+        max_words=max_words,
+        overlap_words=overlap_words,
+    )
+    for c in final_chunks:
+        c["embed_text"] = build_embed_text(c)
+    return final_chunks
+
+
+# ── Pipeline entry point ───────────────────────────────────────────────────────
+
+def run_chunking(
+    pdf_path: str   = PDF_PATH,
+    chunks_path: str = CHUNKS_PATH,
+    start_page: int  = CONTENT_START_PAGE,
+    end_page: int    = CONTENT_END_PAGE,
+    max_words: int = MAX_CHUNK_WORDS,
+    overlap_words: int = CHUNK_WORD_OVERLAP,
+) -> list[dict]:
+    """
+    End-to-end chunking stage: extract PDF text → parse → post-process → save.
+
+    Returns the final list of chunk dicts.
+    """
+    print(f"Extracting pages {start_page}–{end_page} from PDF …")
+    raw_text = extract_text_range(pdf_path, start_page, end_page)
+    print(f"  Extracted {len(raw_text):,} characters")
+
+    print("\nParsing into chunks …")
+    chunks = chunk_text(raw_text)
+    print(f"  Raw chunks : {len(chunks)}")
+
+    chunks = postprocess(
+        chunks,
+        max_words=max_words,
+        overlap_words=overlap_words,
+    )
+    print(f"  After split: {len(chunks)} (max_words={max_words}, overlap={overlap_words})")
+
+    chunks = filter_junk_chunks(chunks)
+    print(f"  Final chunks: {len(chunks)}")
+
+    print_validation_report(chunks)
+
+    # ── Stats ──────────────────────────────────────────────────────────────────
+    domains:  dict[str, int] = {}
+    sections: dict[str, int] = {}
+    for c in chunks:
+        domains [c["domain"] ] = domains.get (c["domain"],  0) + 1
+        sections[c["section"]] = sections.get(c["section"], 0) + 1
+
+    print("\nChunks per domain:")
+    for d, n in sorted(domains.items(),  key=lambda x: -x[1]):
+        print(f"  {n:>4}  {d}")
+
+    print("\nChunks per section:")
+    for s, n in sorted(sections.items(), key=lambda x: -x[1]):
+        print(f"  {n:>4}  {s}")
+
+    # ── Save ───────────────────────────────────────────────────────────────────
+    Path(chunks_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(chunks_path, "w", encoding="utf-8") as f:
+        json.dump(chunks, f, ensure_ascii=False, indent=2)
+    print(f"\nSaved {len(chunks)} chunks → {chunks_path}")
+
+    return chunks
+
+
+if __name__ == "__main__":
+    run_chunking()===== ./src/components/__init__.py =====
