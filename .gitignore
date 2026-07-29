@@ -11,7 +11,7 @@ knowledge_base/fewshot/
 knowledge_base/chroma_db/
 knowledge_base/icd_11.pdf
 notebooks/knowledge_base/chroma_db/
-*.csv
+
 !datasets/processed/multiclass_eval.csv
 !datasets/processed/multiclass_dev.csv
 !datasets/processed/binary_suicide_eval.csv
@@ -37,3 +37,5 @@ notebooks/knowledge_base/chroma_db/
 /notebooks/.ipynb_checkpoints
 # Temporary outputs from page boundry experiment
 /analysis/page_boundary_runs/
+benchmarking/SuicideAndDepression_Detection.csv
+benchmarking/Depression_Severity_Levels_Dataset.csv
