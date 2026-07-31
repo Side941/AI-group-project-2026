@@ -52,6 +52,10 @@ RESULTS_DIR = project_path("results")
 HF_DATASET_REPO = "ourafla/Mental-Health_Text-Classification_Dataset"
 HF_TRAIN_FILE = "mental_health_train.csv"
 HF_TEST_FILE = "mental_health_test.csv"
+# File names inside the Hub repo (renamed upstream; the local cache keeps the
+# original names above). The "heath"/"unbanlanced" typos are upstream's.
+HF_HUB_TRAIN_FILE = "mental_heath_unbanlanced.csv"
+HF_HUB_TEST_FILE = "mental_health_combined_test.csv"
 DATASET_TRAIN_PATH = RAW_DATASETS_DIR / HF_TRAIN_FILE
 DATASET_TEST_PATH = RAW_DATASETS_DIR / HF_TEST_FILE
 

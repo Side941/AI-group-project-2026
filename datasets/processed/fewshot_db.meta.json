@@ -17,7 +17,7 @@
   "eval_holdout_size": 450,
   "fewshot_pool_size_after_holdout": 36554,
   "multiclass_raw_pool_size": 37004,
-  "rebuild": false,
+  "rebuild": true,
   "rows_dropped_eval_holdout": 450,
   "seed": 1337
 }
