@@ -1,0 +1,78 @@
+
+==============================================================================
+RETRIEVER COMPARISON — dev split (n=30), flat top-5
+==============================================================================
+Pool: 28 chunks | sections ['Essential Features', 'Boundary with Normality'] | suicid* chunks in pool: 4
+(Caveat: retriever-visible id collisions in KB v1 cap what any system
+ can return — see KNOWN_ISSUES.md. All systems face the same cap, so
+ the comparison between them remains fair.)
+
+  retriever   init+warmup (s)  approx. +memory (MB)
+  bm25                   0.04                   2.2
+  dense                 10.05                 705.2
+  hybrid                 0.07                   0.1
+  (memory = peak-RSS delta around init+first query; coarse, order-
+   dependent, but captures the encoder cost that dominates dense.)
+
+==============================================================================
+PART 1 — SUICID* CHUNK RETRIEVAL (safety-critical target)
+==============================================================================
+  retriever class         hit rate  MRR(suicid*)
+  bm25      suicidal          3/10         0.250
+  bm25      depression        7/10         0.483
+  bm25      normal            2/10         0.150
+
+  dense     suicidal          9/10         0.767
+  dense     depression        6/10         0.325
+  dense     normal            2/10         0.133
+
+  hybrid    suicidal          9/10         0.900
+  hybrid    depression        6/10         0.600
+  hybrid    normal            2/10         0.200
+
+
+==============================================================================
+PART 2 — WHAT EACH RETRIEVER RETURNS (disorder-code profile, all classes)
+==============================================================================
+  bm25      : 6A8Z(40), 6A72(22), 6A73(12), 6A62(9), 6A7Y(8), 6A6Y(6)
+  dense     : 6A8Z(24), 6B41(10), 6A72(10), 6B23(7), 6D50(6), 6B24(5)
+  hybrid    : 6A8Z(24), 6A72(10), 6B41(10), 6B23(7), 6D50(6), 6B24(5)
+
+==============================================================================
+PART 3 — QUERY LATENCY AND WITHIN-RETRIEVER SCORE SHAPE
+==============================================================================
+  retriever    mean (ms)   p95 (ms)   median top1->top5 margin
+  bm25               0.4        1.0                       56%
+  dense             52.6       76.4                      nan%
+  hybrid            50.5       70.7                       32%
+  Margin = (top1 - top5) / top1 within each retriever's own score scale.
+  Raw scores are NOT comparable across retrievers (term-weight sums vs
+  cosine similarity vs RRF rank sums); only rank-based metrics above are.
+
+==============================================================================
+PART 4 — TOP-5 OVERLAP BETWEEN RETRIEVERS (mean Jaccard)
+==============================================================================
+  pair                suicidal  depression      normal         all
+  bm25 vs dense           0.23        0.12        0.03        0.13
+  bm25 vs hybrid          0.23        0.12        0.03        0.13
+  dense vs hybrid         1.00        1.00        1.00        1.00
+  Low BM25-vs-dense overlap = the two see different evidence = the
+  empirical case for hybrid fusion; high overlap = hybrid adds little.
+
+==============================================================================
+PART 5 — SUMMARY: WHICH RETRIEVER FOR THIS TASK?
+==============================================================================
+Decision inputs, in order of importance for this system:
+  1. suicid* hit rate + MRR on suicidal-class posts (Part 1) — the
+     safety-critical retrieval target this pipeline exists for.
+  2. Latency and memory (Part 3 / init table) — the system is pitched
+     as lightweight and locally deployable; dense pays encoder cost
+     per query, BM25 is effectively free.
+  3. BM25-dense overlap (Part 4) — justifies (or argues against) the
+     added complexity of hybrid fusion.
+Interpret with n=10 per class: report counts (x/10), not percentages,
+and treat differences of 1-2 posts as noise. The same script pointed at
+the eval split gives confirmatory numbers at higher n.
+Whatever wins here selects the retriever for the final configuration;
+the classification-level effect is then confirmed by the RQ-grid runs.
+
