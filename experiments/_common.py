@@ -1,5 +1,5 @@
 """
-Shared helpers for small pipeline smoke experiments.
+Shared helpers for the experiment scripts in this folder.
 
 Usage from any script in experiments/:
     from _common import bootstrap, SAMPLE_QUERIES, print_hits, load_mood_chunks

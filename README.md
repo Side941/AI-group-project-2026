@@ -33,8 +33,10 @@ AI-group-project-2026/
 ├── notebooks/                   # Human-facing walkthroughs / experiments
 │   ├── 01_kb_pipeline_demo.ipynb
 │   ├── 02_multiclass_dataset_prep.ipynb
-│   └── 03_multiclass_rag.ipynb
-├── experiments/                 # Small pipeline smoke tests (.py)
+│   ├── 03_multiclass_rag.ipynb
+│   └── analysis.ipynb
+├── analysis/                    # Retriever/chunking analysis scripts + reports
+├── experiments/                 # Standalone experiment scripts (.py)
 ├── results/                     # Notebook experiment output CSVs
 ├── src/
 │   ├── builders/                # Dataset + KB + few-shot build scripts
@@ -112,17 +114,14 @@ python src/builders/rebuild_all_artifacts.py --skip-evals
 python src/builders/rebuild_all_artifacts.py --reuse-fewshot-db
 ```
 
-### Smoke experiments
+### Analysis scripts
 
-Small scripts under `experiments/` to verify the current pipeline without opening notebooks:
+Standalone scripts under `analysis/` (no Ollama needed); each writes a `.txt` report next to itself:
 
 ```bash
-python experiments/smoke_paths.py
-python experiments/smoke_retrieval.py --skip-dense
-python experiments/smoke_retrieval.py
-python experiments/smoke_fewshot.py
-python experiments/smoke_rag_oneshot.py          # needs Ollama
-python experiments/run_smoke_suite.py --skip-dense
+python analysis/retriever_comparison.py     # BM25 vs dense vs hybrid on the dev split
+python analysis/bm25_suicide_keywords.py    # lexical justification for BM25
+python analysis/page_boundary_experiment.py # chunking page-range study (needs local PDF)
 ```
 
 ### Few-shot retrieval RAG experiment
@@ -150,6 +149,7 @@ Run the first path-setup cell before anything else:
 - `notebooks/01_kb_pipeline_demo.ipynb`
 - `notebooks/02_multiclass_dataset_prep.ipynb`
 - `notebooks/03_multiclass_rag.ipynb`
+- `notebooks/analysis.ipynb` — RAG configuration grid (retriever, top-k, prompt, thinking, model size)
 
 Current experiment outputs are written under `results/`.
 
