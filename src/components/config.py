@@ -121,7 +121,7 @@ FEWSHOT_EMBED_BATCH_SIZE = BATCH_SIZE
 # ── PDF page range (pdftotext page numbers; printed page ≈ PDF − 18) ──────────
 # Clinical CDDR starts at Neurodevelopmental intro / 6A00 (not List of categories).
 # End after secondary syndromes (6E6Z); MB symptom appendix begins ~PDF 695.
-CONTENT_START_PAGE = 109
+CONTENT_START_PAGE = 92
 CONTENT_END_PAGE   = 694
 
 # Flag disorders with more than this many chunks in the post-chunking report.
