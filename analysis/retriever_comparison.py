@@ -163,7 +163,7 @@ for _, row in df.iterrows():
         hits = flat_search(retriever, text, TOP_K)
         latency = time.perf_counter() - t0
         first_suic = next((i + 1 for i, h in enumerate(hits) if is_suicid(h)), 0)
-        score_field = {"bm25": "bm25_score", "dense": "similarity",
+        score_field = {"bm25": "bm25_score", "dense": "dense_score",
                        "hybrid": "hybrid_score"}[name]
         scores = [h.get(score_field) for h in hits
                   if isinstance(h.get(score_field), (int, float))]
