@@ -31,4 +31,5 @@ notebooks/knowledge_base/chroma_db/
 /notebooks/.ipynb_checkpoints
 /notebooks/.ipynb_checkpoints
 /notebooks/.ipynb_checkpoints
-analysis/page_boundary_runs/
+# Temporary outputs from page boundry experiment
+/analysis/page_boundary_runs/

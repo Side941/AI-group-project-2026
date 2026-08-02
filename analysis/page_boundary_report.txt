@@ -1,0 +1,52 @@
+
+==============================================================================
+PAGE BOUNDARY EXPERIMENT
+==============================================================================
+Baseline range: 109-694 (config comment: CDDR clinical content; MB symptom appendix ~695+)
+End candidates:   [700, 710, 724]
+Start candidates: [95]
+All variant chunk files are written under analysis/page_boundary_runs/
+— the committed KB and ChromaDB are not modified.
+
+==============================================================================
+VARIANT end=700: pages 109-700  (baseline 109-694)
+==============================================================================
+chunks: baseline 1569 -> variant 1569 (+0 added, 0 removed)
+no chunks added — the extra pages contribute nothing under the current chunker.
+
+==============================================================================
+VARIANT end=710: pages 109-710  (baseline 109-694)
+==============================================================================
+chunks: baseline 1569 -> variant 1569 (+0 added, 0 removed)
+no chunks added — the extra pages contribute nothing under the current chunker.
+
+==============================================================================
+VARIANT end=724: pages 109-724  (baseline 109-694)
+==============================================================================
+chunks: baseline 1569 -> variant 1569 (+0 added, 0 removed)
+no chunks added — the extra pages contribute nothing under the current chunker.
+
+==============================================================================
+VARIANT start=95: pages 95-694  (baseline 109-694)
+==============================================================================
+chunks: baseline 1569 -> variant 1579 (+7 added, 0 removed)
+added, by code: {'6D72.11': 1, '6D70.1': 1, '6C4G.73': 1, '6E40.Z': 1, '6D8Z': 1, '6E66': 1, '6D86.Z': 1}
+added chunks mentioning suicid*/self-harm: 0
+added chunks passing the CURRENT retrieval filter (mood prefixes x ['Essential Features', 'Boundary with Normality']): 0
+  -> retrieval pool unchanged: with the current filter, these
+     pages cannot affect the live system either way. Any benefit
+     would additionally require widening the pool filter (and,
+     for MB content, teaching the chunker MB codes).
+
+==============================================================================
+CONCLUSION TEMPLATE
+==============================================================================
+The boundary question decomposes into three findings per variant:
+  (a) does extra content exist?          (chunk delta)
+  (b) is it suicide/self-harm relevant?  (suicid* previews)
+  (c) is it usable as-is?                (attribution + pool filter)
+A recommendation to move the boundary is justified only when (a),
+(b) AND (c) hold — otherwise the current 109-694 range stands, with
+(b)-without-(c) cases logged as future work requiring chunker/filter
+changes (KB v2 territory).
+
