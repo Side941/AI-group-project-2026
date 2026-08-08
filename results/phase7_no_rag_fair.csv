@@ -1,0 +1,61 @@
+response_id,config,post_index,true_label,predicted,full_answer,retrieved_chunks,c2_relevant,c2_note,c3_relevant,c3_note
+Phase7-NoRAG-0,No-RAG (fair),0,suicidal,suicidal,"Label: suicidal  
+Justification: The post contains a serious expression of intent to end one's life, including a reference to ""ending it all"" and a specific request to ""kill myself at age 13 without a gun,"" which is a clear indication of suicidal ideation.",(no retrieval),,,,
+Phase7-NoRAG-1,No-RAG (fair),1,suicidal,suicidal,"Label: suicidal  
+Justification: The post contains expressions of profound loneliness, despair, and a sense of hopelessness, with a strong emphasis on feeling broken, unwanted, and deserving of solitude. The individual expresses a desire to be alone and broken, and there is a clear indication of self-harm or suicide as a possible outcome.",(no retrieval),,,,
+Phase7-NoRAG-2,No-RAG (fair),2,suicidal,suicidal,"Label: suicidal
+Justification: The post expresses deep despair, feelings of hopelessness, and a sense of being trapped by societal pressures and lack of support. The speaker is overwhelmed by the idea of leaving gracefully and longs for connection, which are common indicators of suicidal thoughts.",(no retrieval),,,,
+Phase7-NoRAG-3,No-RAG (fair),3,suicidal,suicidal,"Label: suicidal  
+Justification: The post expresses intense feelings of self-hatred, emotional turmoil, and a sense of hopelessness, indicating a risk of suicide.",(no retrieval),,,,
+Phase7-NoRAG-4,No-RAG (fair),4,suicidal,suicidal,"Label: suicidal  
+Justification: The post expresses a severe emotional state, mentions a desire to ""die,"" and indicates a sense of hopelessness and multiple mental health struggles, which are consistent with suicidal ideation.",(no retrieval),,,,
+Phase7-NoRAG-5,No-RAG (fair),5,suicidal,suicidal,"Label: suicidal  
+Justification: The post expresses deep emotional distress, feelings of hopelessness, and a strong desire to end one's life, despite fear. The language used indicates a severe emotional state and a clear indication of suicidal ideation.",(no retrieval),,,,
+Phase7-NoRAG-6,No-RAG (fair),6,suicidal,suicidal,"Label: suicidal  
+Justification: The post expresses a severe emotional distress, mentions a history of overdose, and includes a clear indication of self-harm intent (""take all of my meds and not die but be hospitalized""). The individual is hesitating due to potential medication restrictions, which further supports the classification as suicidal.",(no retrieval),,,,
+Phase7-NoRAG-7,No-RAG (fair),7,suicidal,suicidal,"Label: suicidal  
+Justification: The post expresses uncertainty about the ability to cope with difficulties, which is a sign of potential suicidal ideation.",(no retrieval),,,,
+Phase7-NoRAG-8,No-RAG (fair),8,suicidal,suicidal,"Label: suicidal
+Justification: The post describes a plan involving a suicide pill roulette where a cyanide capsule is mixed with sugar, indicating a serious intent to end one's life. The mention of a ""death placebo"" and the desire to ""go as peacefully as possible"" suggests a self-harm plan, which is a clear indicator of suicidal intent.",(no retrieval),,,,
+Phase7-NoRAG-9,No-RAG (fair),9,suicidal,normal,"Label: normal  
+Justification: The post is a casual expression of frustration and self-awareness, without any indication of suicidal ideation or depression. The user is reflecting on their own experiences but does not express any distressing emotions or intentions.",(no retrieval),,,,
+Phase7-NoRAG-10,No-RAG (fair),10,depression,suicidal,"Label: suicidal  
+Justification: The post expresses severe emotional distress, feelings of being trapped, constant stress, and a desire to ""melt away,"" which are indicative of suicidal ideation. The mention of wanting to ""kind of melt away at this point"" and the context of depression and borderline traits further support the classification.",(no retrieval),,,,
+Phase7-NoRAG-11,No-RAG (fair),11,depression,suicidal,"Label: suicidal  
+Justification: The post expresses severe emotional distress, mentions questioning one's identity, and includes a song that reflects self-harm, indicating a risk of suicide.",(no retrieval),,,,
+Phase7-NoRAG-12,No-RAG (fair),12,depression,suicidal,"Label: suicidal  
+Justification: The post expresses a sense of despair and hopelessness, implying a desire to end one's life and be forgotten, which is a common indicator of suicidal thoughts.",(no retrieval),,,,
+Phase7-NoRAG-13,No-RAG (fair),13,depression,suicidal,"Label: suicidal  
+Justification: The post contains a self-deprecating and despairing statement, expressing a sense of hopelessness and a belief that the speaker is ""pathetic"" and ""no one cares about,"" which are common indicators of suicidal ideation.",(no retrieval),,,,
+Phase7-NoRAG-14,No-RAG (fair),14,depression,suicidal,"Label: suicidal  
+Justification: The post expresses intense emotional distress, frustration, and a sense of helplessness, with the individual using violent language and a tone of despair. The mention of a serious medical procedure and the expression of hopelessness indicate a potential risk of suicide.",(no retrieval),,,,
+Phase7-NoRAG-15,No-RAG (fair),15,depression,suicidal,"Label: suicidal  
+Justification: The post expresses a sense of hopelessness, lack of motivation, and the belief that life has no meaning, which are common indicators of suicidal ideation. The individual states that ""there is only three truths in this world"" and mentions giving up on happiness, which are signs of severe depression or suicidal thoughts.",(no retrieval),,,,
+Phase7-NoRAG-16,No-RAG (fair),16,depression,suicidal,"Label: suicidal
+Justification: The post expresses deep feelings of loneliness, attachment, jealousy, and sadness, with a sense of hopelessness and a struggle to form meaningful relationships. The mention of feeling ""pathetic"" and the inability to form connections with a supervisor suggests a severe emotional distress that may indicate a risk for self-harm.",(no retrieval),,,,
+Phase7-NoRAG-17,No-RAG (fair),17,depression,depression,"Label: depression  
+Justification: The post discusses recurring suicidal thoughts, feelings of loss of identity, and a sense of being trapped in a cycle of depression. The individual expresses deep emotional distress and a sense of being unable to care for themselves, which aligns with the diagnostic criteria for depression.",(no retrieval),,,,
+Phase7-NoRAG-18,No-RAG (fair),18,depression,normal,"Label: normal  
+Justification: The post discusses feeling happy and laughing, mentioning a personal experience of finding joy in laughter, but does not contain any indicators of suicidal ideation or depression. The tone is positive and reflective, with no mention of self-harm or emotional distress.",(no retrieval),,,,
+Phase7-NoRAG-19,No-RAG (fair),19,depression,suicidal,"Label: suicidal  
+Justification: The post contains a serious expression of self-harm and a contemplative reflection on the desire for a solution, which aligns with the criteria for the ""suicidal"" label. The language reflects a deep emotional struggle and a consideration of ending one's life as a potential solution, indicating a risk.",(no retrieval),,,,
+Phase7-NoRAG-20,No-RAG (fair),20,normal,normal,"Label: normal  
+Justification: The post contains a song title and hashtags, which are typically associated with music and entertainment. There is no mention of mental health issues, self-harm, or any other content that would indicate a risk.",(no retrieval),,,,
+Phase7-NoRAG-21,No-RAG (fair),21,normal,suicidal,"Label: suicidal  
+Justification: The post expresses a sense of helplessness and despair, mentioning staying awake for seven hours and feeling unable to sleep, which could indicate a risk of suicide.",(no retrieval),,,,
+Phase7-NoRAG-22,No-RAG (fair),22,normal,suicidal,"Label: suicidal  
+Justification: The post expresses a desire to create something but includes a fear of not being able to take care of it, which is a common indicator of suicidal ideation.",(no retrieval),,,,
+Phase7-NoRAG-23,No-RAG (fair),23,normal,suicidal,"Label: suicidal  
+Justification: The post mentions a physical injury (sprained leg, pus, stomach pain) and includes a reference to a ""disaster before Eid,"" which may be interpreted as a serious health concern. The mention of a ""disaster"" and the severity of the injury could indicate a risk of suicide.",(no retrieval),,,,
+Phase7-NoRAG-24,No-RAG (fair),24,normal,suicidal,"Label: suicidal  
+Justification: The post contains a violent and threatening scenario involving physical aggression and a coercive request, which is indicative of suicidal ideation.",(no retrieval),,,,
+Phase7-NoRAG-25,No-RAG (fair),25,normal,suicidal,"Label: suicidal  
+Justification: The post contains a reference to ""EXO"" and ""SVTT"" which are likely references to a music group and a streaming service, respectively. The tone is消极 (negative) and the mention of waiting for a comeback suggests a sense of frustration and hopelessness, which can be associated with suicidal thoughts.",(no retrieval),,,,
+Phase7-NoRAG-26,No-RAG (fair),26,normal,suicidal,"Label: suicidal  
+Justification: The post contains a reference to ""discord"" and ""wanting the D,"" which are commonly associated with suicidal ideation in online contexts. The tone and wording suggest a potential risk for self-harm.",(no retrieval),,,,
+Phase7-NoRAG-27,No-RAG (fair),27,normal,normal,"Label: normal  
+Justification: The post expresses a desire to play a game but does not contain any indicators of suicidal ideation or depression. The statement is neutral and does not reflect a mental health risk.",(no retrieval),,,,
+Phase7-NoRAG-28,No-RAG (fair),28,normal,normal,"Label: normal  
+Justification: The post is a simple statement about technical issues and does not contain any indicators of suicidal ideation or depression.",(no retrieval),,,,
+Phase7-NoRAG-29,No-RAG (fair),29,normal,normal,"Label: normal  
+Justification: The post states that the world needs more polite people like us, which is a general statement about the importance of politeness. There is no indication of self-harm, depression, or any other mental health risk. The statement is neutral and does not reflect a personal struggle.",(no retrieval),,,,

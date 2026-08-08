@@ -47,11 +47,16 @@ CHROMA_PATH = ICD11_STORE_DIR / "chroma_db"
 RAW_DATASETS_DIR = project_path("datasets", "raw")
 PROCESSED_DATASETS_DIR = project_path("datasets", "processed")
 RESULTS_DIR = project_path("results")
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Hugging Face mental-health corpus (local cache + Hub fallback).
 HF_DATASET_REPO = "ourafla/Mental-Health_Text-Classification_Dataset"
 HF_TRAIN_FILE = "mental_health_train.csv"
 HF_TEST_FILE = "mental_health_test.csv"
+# File names inside the Hub repo (renamed upstream; the local cache keeps the
+# original names above). The "heath"/"unbanlanced" typos are upstream's.
+HF_HUB_TRAIN_FILE = "mental_heath_unbanlanced.csv"
+HF_HUB_TEST_FILE = "mental_health_combined_test.csv"
 DATASET_TRAIN_PATH = RAW_DATASETS_DIR / HF_TRAIN_FILE
 DATASET_TEST_PATH = RAW_DATASETS_DIR / HF_TEST_FILE
 
@@ -86,32 +91,10 @@ RAG_DEV_PER_CLASS = MULTICLASS_DEV_PER_CLASS
 RAG_DEV_SEED = MULTICLASS_DEV_SEED
 DATASET_PATH = MULTICLASS_EVAL_PATH
 
-# ── Binary suicide classification (raw source + derived eval/dev) ─────────────
-BINARY_SOURCE_PATH = RAW_DATASETS_DIR / "suicide_detection_raw.csv"
-BINARY_EVAL_PATH = PROCESSED_DATASETS_DIR / "binary_suicide_eval.csv"
-BINARY_EVAL_META_PATH = PROCESSED_DATASETS_DIR / "binary_suicide_eval.meta.json"
-BINARY_DEV_PATH = PROCESSED_DATASETS_DIR / "binary_suicide_dev.csv"
-BINARY_DEV_META_PATH = PROCESSED_DATASETS_DIR / "binary_suicide_dev.meta.json"
-BINARY_LABELS: tuple[str, ...] = ("suicide", "non-suicide")
-BINARY_EVAL_PER_CLASS = 150
-BINARY_EVAL_SEED = 42
-BINARY_DEV_PER_CLASS = 10
-BINARY_DEV_SEED = 43
-BINARY_MIN_CHARS = 40
-BINARY_MAX_CHARS = 2000
-
-# Backward-compatible aliases.
-BINARY_EVAL_SUBSET_PATH = BINARY_EVAL_PATH
-BINARY_DEV_SLICE_PATH = BINARY_DEV_PATH
-BINARY_DATASET_PATH = BINARY_EVAL_PATH
-
 # Experiment run outputs (RAG predictions, summaries, error analysis).
 MULTICLASS_RESULTS_FINAL_PATH = RESULTS_DIR / "multiclass_rag_results.csv"
 MULTICLASS_RESULTS_SUMMARY_PATH = RESULTS_DIR / "multiclass_summary.csv"
 MULTICLASS_ERROR_ANALYSIS_PATH = RESULTS_DIR / "multiclass_error_analysis.csv"
-BINARY_RESULTS_FINAL_PATH = RESULTS_DIR / "binary_rag_results.csv"
-BINARY_RESULTS_SUMMARY_PATH = RESULTS_DIR / "binary_summary.csv"
-BINARY_ERROR_ANALYSIS_PATH = RESULTS_DIR / "binary_error_analysis.csv"
 
 # Backward-compatible aliases.
 RAG_RESULTS_FINAL_PATH = MULTICLASS_RESULTS_FINAL_PATH
@@ -119,20 +102,17 @@ RAG_RESULTS_SUMMARY_PATH = MULTICLASS_RESULTS_SUMMARY_PATH
 RAG_ERROR_ANALYSIS_PATH = MULTICLASS_ERROR_ANALYSIS_PATH
 
 # ── Few-shot vector store (blueprint: planned) ────────────────────────────────
-# This store is built from the raw datasets (multiclass + binary) and can be
-# queried later to assemble dynamic few-shot prompts.
+# Built from the multiclass raw dataset (same cleaning/filter pipeline as eval/dev)
+# and queried later to assemble dynamic few-shot prompts.
 FEWSHOT_STORE_DIR = project_path("knowledge_base", "fewshot")
 FEWSHOT_CHROMA_PATH = FEWSHOT_STORE_DIR / "chroma_db"
 FEWSHOT_MULTICLASS_EXAMPLES_PATH = FEWSHOT_STORE_DIR / "multiclass_examples.json"
-FEWSHOT_BINARY_EXAMPLES_PATH = FEWSHOT_STORE_DIR / "binary_examples.json"
 FEWSHOT_DB_META_PATH = PROCESSED_DATASETS_DIR / "fewshot_db.meta.json"
 
 FEWSHOT_COLLECTION_MULTICLASS = "fewshot_multiclass"
-FEWSHOT_COLLECTION_BINARY = "fewshot_binary"
 
 # Deterministic per-label sampling caps (keeps the store size reasonable).
 FEWSHOT_MULTICLASS_MAX_PER_LABEL = 200
-FEWSHOT_BINARY_MAX_PER_CLASS = 200
 FEWSHOT_BUILD_SEED = 1337
 
 # Embedding model + performance knobs (reuses the same ICD-11 embedding model).
