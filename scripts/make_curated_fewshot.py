@@ -53,10 +53,9 @@ CURATED_IDS: dict[str, list[str]] = {
     # without active suicidal intent.
     "depression": [
         "mc_000200",  # dismissed as a teen phase, starting antidepressants
-        "mc_000203",  # small victories (hygiene), recovery framing
         "mc_000220",  # anhedonia despite lifestyle changes
         "mc_000223",  # motivation catch-22
-        "mc_000224",  # wasted 20s being depressed
+        "mc_000225",  # exhausted despite therapy, self-hatred
         "mc_000226",  # short: sadness deep in the bones
         "mc_000230",  # cognitive/memory decline from depression
         "mc_000234",  # trapped, worthless, drowning in distractions
@@ -72,6 +71,7 @@ CURATED_IDS: dict[str, list[str]] = {
         "mc_000303",  # depressed on a Hawaii vacation
         "mc_000307",  # alcohol as coping, college student
         "mc_000352",  # googling "depression signs", inertia
+        "mc_000354",  # basic self-care upkeep exhausting
     ],
     # Everyday chatter with no mental-health distress signal.
     "normal": [
