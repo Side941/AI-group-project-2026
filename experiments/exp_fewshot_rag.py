@@ -37,7 +37,7 @@ from bm25_retriever import BM25Retriever  # noqa: E402
 from components.config import (  # noqa: E402
     CHROMA_PATH,
     FEWSHOT_CHROMA_PATH,
-    FEWSHOT_MULTICLASS_EXAMPLES_PATH,
+    FEWSHOT_MULTICLASS_CURATED_EXAMPLES_PATH,
     RETRIEVAL_SECTIONS,
 )
 from fewshot_retrievers import (  # noqa: E402
@@ -123,11 +123,11 @@ def build_kb_retriever(name: str, *, alpha: float):
 
 
 def build_fewshot_retriever(name: str, *, alpha: float):
-    examples_path = FEWSHOT_MULTICLASS_EXAMPLES_PATH
+    examples_path = FEWSHOT_MULTICLASS_CURATED_EXAMPLES_PATH
     if not examples_path.exists():
         raise FileNotFoundError(
-            f"Few-shot examples missing at {examples_path}. "
-            "Build with: python src/builders/rebuild_all_artifacts.py"
+            f"Curated few-shot examples missing at {examples_path}. "
+            "Regenerate with: python scripts/make_curated_fewshot.py"
         )
 
     if name == "bm25":
