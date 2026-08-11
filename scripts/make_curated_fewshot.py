@@ -29,7 +29,6 @@ CURATED_IDS: dict[str, list[str]] = {
     # Explicit suicidal ideation, plans, attempts or method-seeking.
     "suicidal": [
         "mc_000000",  # noose tied, dismissed by services
-        "mc_000002",  # indirect ideation, very short
         "mc_000008",  # chronic ideation, driving into a wall
         "mc_000009",  # recent paracetamol attempt
         "mc_000014",  # writing goodbye letters/videos
@@ -47,6 +46,7 @@ CURATED_IDS: dict[str, list[str]] = {
         "mc_000117",  # will hang myself soon
         "mc_000120",  # married mother, religious framing, wants out
         "mc_000125",  # 14yo, "getting really close to ending it"
+        "mc_000187",  # short prep checklist: finances, suicide letters
         "mc_000196",  # about to jump from a moving car
     ],
     # Clear depressive symptoms (low mood, anhedonia, fatigue, hopelessness)
