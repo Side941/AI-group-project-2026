@@ -1,0 +1,175 @@
+
+==============================================================================
+PART 1 — KNOWLEDGE BASE INVENTORY  (snapshot)
+==============================================================================
+Total chunks in icd11_chunks.json: 1581
+chunks carrying a chunk_uid field: 1581
+Mood-disorder chunks (prefixes ('6A6', '6A7', '6A8', 'EP.')): 137
+Retrieval pool (sections ['Essential Features', 'Boundary with Normality']): 28 chunks
+
+Retrieval pool by disorder:
+  6A60       Bipolar type I disorder                 1 chunks  [Essential Features]
+  6A61       Bipolar type II disorder                1 chunks  [Essential Features]
+  6A62       Cyclothymic disorder                    2 chunks  [Boundary with Normality, Essential Features]
+  6A6Y       Other specified bipolar or related dis  1 chunks  [Essential Features]
+  6A70       Single episode depressive disorder      1 chunks  [Essential Features]
+  6A71       Recurrent depressive disorder           1 chunks  [Essential Features]
+  6A72       Dysthymic disorder                      3 chunks  [Boundary with Normality, Essential Features x2]
+  6A73       Mixed depressive and anxiety disorder   2 chunks  [Boundary with Normality, Essential Features]
+  6A7Y       Other specified depressive disorder     1 chunks  [Essential Features]
+  6A8Y       Other specified mood disorder           1 chunks  [Essential Features]
+  EP.DEP     Depressive episode                      4 chunks  [Boundary with Normality x2, Essential Features x2]
+  EP.HYP     Hypomanic episode                       4 chunks  [Boundary with Normality, Essential Features x3]
+  EP.MAN     Manic episode                           4 chunks  [Boundary with Normality, Essential Features x3]
+  EP.MIX     Mixed episode                           2 chunks  [Essential Features x2]
+
+Retriever-visible id collisions in the pool (chunks sharing one id — only ONE of each group is ever retrievable):
+  none — every pool chunk has a unique retriever id
+
+Where suicid* content lives in the pool:
+  EP.DEP     Depressive episode                 Essential Features       p1
+      • The concurrent presence of at least five of the following characteristic symptoms occurring for mo
+  EP.DEP     Depressive episode                 Essential Features       p2
+      suicidal ideation (with or without a specific plan), or evidence of attempted suicide Mood disorders
+  EP.DEP     Depressive episode                 Boundary with Normality  p2
+      a depressive episode can be superimposed on normal grief. The presence of a depressive episode durin
+  EP.MIX     Mixed episode                      Essential Features       p1
+      • Several prominent manic and several prominent depressive symptoms consistent with those observed i
+
+==============================================================================
+PART 2 — RETRIEVAL RESULTS, k=5  (snapshot)
+==============================================================================
+
+>>> query class "suicidal": "I keep thinking about ending my life. I feel hopeless and worthless an..."
+  [bm25] returned 8 chunks:
+    [1] EP.MIX     Mixed episode                      Essential Features       p1
+    [2] 6A72       Dysthymic disorder                 Boundary with Normality 
+    [3] 6A72       Dysthymic disorder                 Essential Features       p1
+    [4] 6A70       Single episode depressive disorder Essential Features      
+    [5] 6A61       Bipolar type II disorder           Essential Features      
+    [6] EP.DEP     Depressive episode                 Boundary with Normality  p1
+    [7] EP.DEP     Depressive episode                 Essential Features       p1
+    [8] EP.DEP     Depressive episode                 Essential Features       p2
+  [dense] returned 12 chunks:
+    [1] EP.DEP     Depressive episode                 Essential Features       p1
+    [2] EP.DEP     Depressive episode                 Boundary with Normality  p1
+    [3] 6D50       Factitious disorder imposed on sel Essential Features       p1
+    [4] 6A72       Dysthymic disorder                 Essential Features       p1
+    [5] 6A72       Dysthymic disorder                 Boundary with Normality 
+    [6] 6B42       Prolonged grief disorder           Essential Features       p1
+    [7] 6B42       Prolonged grief disorder           Boundary with Normality 
+    [8] 6A72       Dysthymic disorder                 Essential Features       p2
+    [9] 6B23       Hypochondriasis (health anxiety di Essential Features       p2
+    [10] 6B23       Hypochondriasis (health anxiety di Essential Features       p1
+    [11] EP.DEP     Depressive episode                 Essential Features       p2
+    [12] EP.DEP     Depressive episode                 Boundary with Normality  p2
+  [hybrid] returned 10 chunks:
+    [1] EP.DEP     Depressive episode                 Essential Features       p1
+    [2] EP.DEP     Depressive episode                 Boundary with Normality  p1
+    [3] 6A72       Dysthymic disorder                 Essential Features       p1
+    [4] 6A72       Dysthymic disorder                 Boundary with Normality 
+    [5] EP.DEP     Depressive episode                 Essential Features       p2
+    [6] 6D50       Factitious disorder imposed on sel Essential Features       p1
+    [7] 6B42       Prolonged grief disorder           Essential Features       p1
+    [8] 6A72       Dysthymic disorder                 Essential Features       p2
+    [9] 6B23       Hypochondriasis (health anxiety di Essential Features       p2
+    [10] 6B23       Hypochondriasis (health anxiety di Essential Features       p1
+  [bm25, expand=False] returned 5 chunks (requested k=5)
+  [dense, expand=False] returned 5 chunks (requested k=5)
+
+>>> query class "depression": "I've been sad most days for weeks, can't sleep, lost interest in every..."
+  [bm25] returned 12 chunks:
+    [1] EP.DEP     Depressive episode                 Essential Features       p1
+    [2] EP.DEP     Depressive episode                 Boundary with Normality  p1
+    [3] 6A72       Dysthymic disorder                 Essential Features       p1
+    [4] 6A72       Dysthymic disorder                 Boundary with Normality 
+    [5] EP.DEP     Depressive episode                 Boundary with Normality  p2
+    [6] EP.MIX     Mixed episode                      Essential Features       p1
+    [7] EP.MAN     Manic episode                      Essential Features       p1
+    [8] EP.MAN     Manic episode                      Boundary with Normality 
+    [9] 6A73       Mixed depressive and anxiety disor Essential Features      
+    [10] 6A73       Mixed depressive and anxiety disor Boundary with Normality 
+    [11] EP.DEP     Depressive episode                 Essential Features       p2
+    [12] EP.MAN     Manic episode                      Essential Features       p2
+  [dense] returned 14 chunks:
+    [1] EP.DEP     Depressive episode                 Essential Features       p1
+    [2] EP.DEP     Depressive episode                 Boundary with Normality  p1
+    [3] EP.DEP     Depressive episode                 Essential Features       p2
+    [4] 6C20       Bodily distress disorder           Essential Features       p2
+    [5] 6A72       Dysthymic disorder                 Essential Features       p2
+    [6] 6A72       Dysthymic disorder                 Boundary with Normality 
+    [7] 6A72       Dysthymic disorder                 Essential Features       p1
+    [8] 6B66       Depersonalization-derealization di Essential Features       p2
+    [9] 6B66       Depersonalization-derealization di Boundary with Normality 
+    [10] EP.HYP     Hypomanic episode                  Essential Features       p1
+    [11] EP.HYP     Hypomanic episode                  Boundary with Normality 
+    [12] 6C20       Bodily distress disorder           Essential Features       p1
+    [13] 6B66       Depersonalization-derealization di Essential Features       p1
+    [14] EP.DEP     Depressive episode                 Boundary with Normality  p2
+  [hybrid] returned 15 chunks:
+    [1] EP.DEP     Depressive episode                 Essential Features       p1
+    [2] EP.DEP     Depressive episode                 Boundary with Normality  p1
+    [3] EP.DEP     Depressive episode                 Essential Features       p2
+    [4] 6A72       Dysthymic disorder                 Essential Features       p1
+    [5] 6A72       Dysthymic disorder                 Boundary with Normality 
+    [6] EP.HYP     Hypomanic episode                  Essential Features       p1
+    [7] EP.HYP     Hypomanic episode                  Boundary with Normality 
+    [8] EP.MAN     Manic episode                      Essential Features       p1
+    [9] EP.MAN     Manic episode                      Boundary with Normality 
+    [10] 6A73       Mixed depressive and anxiety disor Essential Features       p1
+    [11] 6A73       Mixed depressive and anxiety disor Boundary with Normality 
+    [12] 6A72       Dysthymic disorder                 Essential Features       p2
+    [13] EP.DEP     Depressive episode                 Boundary with Normality  p2
+    [14] EP.HYP     Hypomanic episode                  Essential Features       p2
+    [15] EP.MAN     Manic episode                      Essential Features       p2
+  [bm25, expand=False] returned 5 chunks (requested k=5)
+  [dense, expand=False] returned 5 chunks (requested k=5)
+
+>>> query class "normal": "Work was stressful this week but I'm looking forward to the weekend wi..."
+  [bm25] returned 9 chunks:
+    [1] 6A73       Mixed depressive and anxiety disor Essential Features      
+    [2] 6A73       Mixed depressive and anxiety disor Boundary with Normality 
+    [3] 6A8Y       Other specified mood disorder      Essential Features      
+    [4] 6A7Y       Other specified depressive disorde Essential Features      
+    [5] EP.MAN     Manic episode                      Essential Features       p1
+    [6] EP.MAN     Manic episode                      Boundary with Normality 
+    [7] EP.DEP     Depressive episode                 Essential Features       p1
+    [8] EP.DEP     Depressive episode                 Boundary with Normality  p1
+    [9] EP.DEP     Depressive episode                 Essential Features       p2
+  [dense] returned 10 chunks:
+    [1] EP.MAN     Manic episode                      Boundary with Normality  p1
+    [2] EP.MAN     Manic episode                      Essential Features       p1
+    [3] 6B66       Depersonalization-derealization di Boundary with Normality  p1
+    [4] 6B66       Depersonalization-derealization di Essential Features       p1
+    [5] 6B00       Generalized anxiety disorder       Boundary with Normality  p1
+    [6] 6B00       Generalized anxiety disorder       Essential Features       p1
+    [7] 6A72       Dysthymic disorder                 Boundary with Normality  p1
+    [8] 6A72       Dysthymic disorder                 Essential Features       p1
+    [9] 6B40       Post-traumatic stress disorder     Boundary with Normality  p1
+    [10] 6B40       Post-traumatic stress disorder     Essential Features       p1
+  [hybrid] returned 7 chunks:
+    [1] EP.MAN     Manic episode                      Boundary with Normality  p1
+    [2] EP.MAN     Manic episode                      Essential Features       p1
+    [3] 6B66       Depersonalization-derealization di Boundary with Normality  p1
+    [4] 6B00       Generalized anxiety disorder       Boundary with Normality  p1
+    [5] 6A72       Dysthymic disorder                 Boundary with Normality  p1
+    [6] 6A72       Dysthymic disorder                 Essential Features       p1
+    [7] 6B40       Post-traumatic stress disorder     Boundary with Normality  p1
+  [bm25, expand=False] returned 5 chunks (requested k=5)
+  [dense, expand=False] returned 5 chunks (requested k=5)
+
+==============================================================================
+PART 3 — PROMPT CONTEXT BLOCK (bm25, suicidal query)  (snapshot)
+==============================================================================
+This is the clinical-knowledge block exactly as build_prompt() formats it:
+
+[1] (Mixed episode — Essential Features): • Several prominent manic and several prominent depressive symptoms consistent with those observed in manic episodes and depressive episodes are present, which either occur simultaneously or alternate very rapidly (from day to day or within
+[2] (Dysthymic disorder — Boundary with Normality): • Some depressed mood is a normal reaction to severe adverse life events and problems, and is common in the community. Dysthymic disorder is differentiated from this common experience by the severity, range and duration of symptoms. Assessm
+[3] (Dysthymic disorder — Essential Features): • Persistent depressed mood (i.e. lasting 2 years or more), for most of the day, for more days than not, as reported by the individual (e.g. feeling down, sad) or as observed (e.g. tearful, defeated appearance), is required for diagnosis. I
+[4] (Single episode depressive disorder — Essential Features): • The presence or a history of a single depressive episode (see above essential features) is required for diagnosis. • There is no history of manic, mixed or hypomanic episodes, which would indicate the presence of a bipolar disorder. Sever
+[5] (Bipolar type II disorder — Essential Features): • A history of at least one hypomanic episode and at least one depressive episode (see above essential features for mood episodes) is required for diagnosis. The typical course of the disorder is characterized by recurrent depressive and hy
+[6] (Depressive episode — Boundary with Normality): • Some depression of mood is a normal reaction to severe adverse life events and problems (e.g. divorce, job loss), and is common in the community. A depressive episode is differentiated from this common experience by the severity, range an
+[7] (Depressive episode — Essential Features): • The concurrent presence of at least five of the following characteristic symptoms occurring for most of the day, nearly every day, during a period lasting at least 2 weeks is required for diagnosis. At least one symptom from the affective
+[8] (Depressive episode — Essential Features): suicidal ideation (with or without a specific plan), or evidence of attempted suicide Mood disorders 213 Neurovegetative cluster • Significantly disrupted sleep (delayed sleep onset, increased frequency of waking during the night, or early 
+
+==============================================================================

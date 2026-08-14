@@ -21,10 +21,10 @@
     "depression",
     "normal"
   ],
-  "load_mode": "local",
+  "load_mode": "huggingface",
   "max_chars": 2000,
   "min_chars": 40,
-  "output_csv": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\processed\\multiclass_eval.csv",
+  "output_csv": "/Users/sidemoctardialla/Desktop/AI-group-project-2026/datasets/processed/multiclass_eval.csv",
   "output_label_counts": {
     "depression": 150,
     "normal": 150,
@@ -44,12 +44,12 @@
   "seed": 42,
   "test_input": {
     "exists": true,
-    "path": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\raw\\mental_health_test.csv",
-    "size_bytes": 790695
+    "path": "/Users/sidemoctardialla/Desktop/AI-group-project-2026/datasets/raw/mental_health_test.csv",
+    "size_bytes": 789702
   },
   "train_input": {
     "exists": true,
-    "path": "C:\\Users\\Ramy\\AI-group-project-2026\\datasets\\raw\\mental_health_train.csv",
-    "size_bytes": 20801685
+    "path": "/Users/sidemoctardialla/Desktop/AI-group-project-2026/datasets/raw/mental_health_train.csv",
+    "size_bytes": 20752072
   }
 }
