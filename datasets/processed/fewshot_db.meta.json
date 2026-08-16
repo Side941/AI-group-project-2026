@@ -15,7 +15,7 @@
     },
     "multiclass_curated": {
       "collection_name": "fewshot_multiclass_curated",
-      "examples_json": "/Users/sidemoctardialla/Desktop/AI-group-project-2026/knowledge_base/fewshot/multiclass_examples_curated.json",
+      "examples_json": "/Users/omarhalasa/Desktop/AI Group Project/Github/AI-group-project-2026/knowledge_base/fewshot/multiclass_examples_curated.json",
       "labels": [
         "suicidal",
         "depression",
