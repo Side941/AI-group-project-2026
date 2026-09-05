@@ -14,12 +14,8 @@ notebooks/knowledge_base/chroma_db/
 
 !datasets/processed/multiclass_eval.csv
 !datasets/processed/multiclass_dev.csv
-!datasets/processed/binary_suicide_eval.csv
-!datasets/processed/binary_suicide_dev.csv
 !datasets/processed/multiclass_eval.meta.json
 !datasets/processed/multiclass_dev.meta.json
-!datasets/processed/binary_suicide_eval.meta.json
-!datasets/processed/binary_suicide_dev.meta.json
 !datasets/processed/fewshot_db.meta.json
 /anaconda_projects
 /.virtual_documents
@@ -39,3 +35,6 @@ notebooks/knowledge_base/chroma_db/
 /analysis/page_boundary_runs/
 benchmarking/SuicideAndDepression_Detection.csv
 benchmarking/Depression_Severity_Levels_Dataset.csv
+datasets/raw/mental_health_test.csv
+datasets/raw/mental_health_train.csv
+models

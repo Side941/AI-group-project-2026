@@ -1,21 +1,25 @@
 """
 rebuild_all_artifacts.py
 ========================
-Rebuild both processed evaluation datasets (multiclass + binary) and build a
-few-shot Chroma vector store from the raw datasets.
+Rebuild the processed multiclass evaluation dataset and the few-shot store.
 
 Blueprint alignment:
 - Multiclass head uses the HF mental-health dataset.
-- Binary head uses `datasets/raw/suicide_detection_raw.csv`.
-- Few-shot vector DB stores (example_text, label) pairs that can later be
-  retrieved to assemble dynamic few-shot prompts.
+- Few-shot examples support dynamic few-shot prompts at classification time.
+
+Few-shot store layout:
+- multiclass_examples.json: the full auto-sampled pool. It is still exported
+  here exactly as before (same cleaning, eval holdout, seeding and per-label
+  caps) but it is NOT embedded or used at retrieval time - it is kept only as
+  the pool the curated examples were picked from.
+- multiclass_examples_curated.json: hand-curated subset (see
+  scripts/make_curated_fewshot.py). This is what BM25 loads and what
+  build_curated_fewshot_db.py embeds into the Chroma collection used by
+  dense retrieval.
 
 Important:
-- We build the vector DB, but we do NOT wire retrieval from it into the
-  classification pipeline yet.
-- Few-shot examples are taken from the raw datasets, but they are passed
-  through the same cleaning / filtering pipeline used by the processed
-  evaluation datasets before they are sampled and embedded.
+- Eval posts (and therefore the nested dev slice) are held out of the few-shot
+  pool so retrieved examples cannot leak into evaluation.
 
 Run:
     python src/builders/rebuild_all_artifacts.py
@@ -41,35 +45,46 @@ for _path in (_SRC, _SRC / "retriever", _BUILDERS_DIR):
         sys.path.insert(0, _s)
 
 from components.config import (  # noqa: E402
-    BINARY_LABELS,
     EMBEDDING_MODEL,
-    FEWSHOT_BINARY_EXAMPLES_PATH,
     FEWSHOT_BUILD_SEED,
-    FEWSHOT_CHROMA_PATH,
-    FEWSHOT_COLLECTION_BINARY,
-    FEWSHOT_COLLECTION_MULTICLASS,
     FEWSHOT_DB_META_PATH,
-    FEWSHOT_EMBED_BATCH_SIZE,
-    FEWSHOT_EMBEDDING_MAX_SEQ_LENGTH,
-    FEWSHOT_BINARY_MAX_PER_CLASS,
     FEWSHOT_MULTICLASS_EXAMPLES_PATH,
     FEWSHOT_MULTICLASS_MAX_PER_LABEL,
     RAG_EVAL_LABELS,
+    RAG_EVAL_SUBSET_PATH,
 )
-import build_binary_dataset as binary_builder  # noqa: E402
+import build_curated_fewshot_db as curated_builder  # noqa: E402
 import build_multiclass_dataset as multiclass_builder  # noqa: E402
 
 
-def _build_multiclass_fewshot_pool() -> pd.DataFrame:
+def _eval_holdout_keys() -> set[str]:
+    """Lowercased texts from the committed eval split (dev is nested inside it)."""
+    if not RAG_EVAL_SUBSET_PATH.exists():
+        raise FileNotFoundError(
+            f"Eval CSV required to hold out leakage from few-shot pool: {RAG_EVAL_SUBSET_PATH}. "
+            "Run without --skip-evals first, or build with: python src/builders/build_multiclass_dataset.py"
+        )
+    eval_df = pd.read_csv(RAG_EVAL_SUBSET_PATH)
+    return set(eval_df["text"].astype(str).str.strip().str.lower())
+
+
+def _build_multiclass_fewshot_pool() -> tuple[pd.DataFrame, dict]:
     raw, _ = multiclass_builder.load_raw_frames()
     cleaned, _ = multiclass_builder.filter_and_clean(raw)
-    return cleaned.reset_index(drop=True)
-
-
-def _build_binary_fewshot_pool() -> pd.DataFrame:
-    raw, _ = binary_builder.load_raw_frame()
-    cleaned, _ = binary_builder.filter_and_clean(raw)
-    return cleaned.reset_index(drop=True)
+    holdout = _eval_holdout_keys()
+    before = len(cleaned)
+    pool = cleaned[~cleaned["text"].astype(str).str.strip().str.lower().isin(holdout)].copy()
+    stats = {
+        "cleaned_pool_size": int(before),
+        "eval_holdout_size": int(len(holdout)),
+        "fewshot_pool_size": int(len(pool)),
+        "rows_dropped_eval_holdout": int(before - len(pool)),
+    }
+    print(
+        f"Few-shot pool after eval holdout: {stats['fewshot_pool_size']} "
+        f"(dropped {stats['rows_dropped_eval_holdout']} eval texts)"
+    )
+    return pool.reset_index(drop=True), stats
 
 
 def _sample_balanced(df: pd.DataFrame, *, labels: list[str], per_label: int, seed: int) -> pd.DataFrame:
@@ -96,7 +111,6 @@ def _sample_balanced(df: pd.DataFrame, *, labels: list[str], per_label: int, see
 def _export_examples_json(
     frame: pd.DataFrame,
     *,
-    head: str,
     path: Path,
     id_prefix: str,
 ) -> list[dict]:
@@ -106,10 +120,8 @@ def _export_examples_json(
         rows.append(
             {
                 "id": f"{id_prefix}_{idx:06d}",
-                "head": head,
-                "post": row["text"],
+                "text": row["text"],
                 "label": row["label"],
-                "text": row["text"],  # alias for downstream retriever convenience
                 "source_split": row.get("source_split", "source"),
             }
         )
@@ -118,79 +130,11 @@ def _export_examples_json(
     return rows
 
 
-def _embed_and_write_collection(
-    *,
-    chroma_client,
-    collection_name: str,
-    texts: list[str],
-    labels: list[str],
-    metadatas: list[dict],
-    ids: list[str],
-    rebuild: bool,
-) -> None:
-    import torch
-    import chromadb
-    from sentence_transformers import SentenceTransformer
-    from tqdm import tqdm
-
-    global _EMBEDDER
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"\nEmbedding for collection '{collection_name}' on device: {device}")
-
-    embedder = SentenceTransformer(EMBEDDING_MODEL, device=device)
-    embedder.max_seq_length = FEWSHOT_EMBEDDING_MAX_SEQ_LENGTH
-    print("Embedding model dims:", embedder.get_sentence_embedding_dimension())
-
-    if rebuild:
-        existing = [c.name for c in chroma_client.list_collections()]
-        if collection_name in existing:
-            chroma_client.delete_collection(collection_name)
-
-    collection = chroma_client.get_or_create_collection(
-        name=collection_name,
-        metadata={"hnsw:space": "cosine"},
-    )
-
-    existing_count = collection.count()
-    if existing_count == len(texts):
-        print(f"Collection '{collection_name}' already has {collection.count()} vectors; skipping.")
-        return
-    if existing_count != 0 and not rebuild:
-        raise RuntimeError(
-            f"Few-shot collection '{collection_name}' already exists with {existing_count} vectors, "
-            f"but expected {len(texts)}. Re-run with --reuse-fewshot-db only when counts match, "
-            f"or use default (rebuild)."
-        )
-
-    print(f"Writing {len(texts)} vectors into '{collection_name}' …")
-    # Embed in batches.
-    for i in tqdm(range(0, len(texts), FEWSHOT_EMBED_BATCH_SIZE), desc="Embedding batches"):
-        batch_texts = texts[i : i + FEWSHOT_EMBED_BATCH_SIZE]
-        batch_embeddings = embedder.encode(
-            batch_texts,
-            batch_size=FEWSHOT_EMBED_BATCH_SIZE,
-            show_progress_bar=False,
-            normalize_embeddings=True,
-        ).tolist()
-
-        batch_ids = ids[i : i + FEWSHOT_EMBED_BATCH_SIZE]
-        batch_metas = metadatas[i : i + FEWSHOT_EMBED_BATCH_SIZE]
-        collection.add(
-            ids=batch_ids,
-            embeddings=batch_embeddings,
-            metadatas=batch_metas,
-            documents=batch_texts,
-        )
-
-    print(f"Done. Collection '{collection_name}' now has {collection.count()} vectors.")
-
-
 def build_fewshot_db(*, rebuild: bool, seed: int) -> dict:
-    # Build pools from raw datasets using the same cleaning/filter pipeline
-    # as the processed eval/dev builders for consistency.
-    print("\nBuilding few-shot pools from raw datasets via the shared preprocessing pipeline …")
-    multi_pool = _build_multiclass_fewshot_pool()
-    bin_pool = _build_binary_fewshot_pool()
+    # Build pool from raw multiclass data using the same cleaning/filter pipeline
+    # as the processed eval/dev builder, then hold out eval texts to prevent leakage.
+    print("\nBuilding few-shot pool from raw multiclass data via the shared preprocessing pipeline …")
+    multi_pool, pool_stats = _build_multiclass_fewshot_pool()
 
     # Sample balanced caps for deterministic size.
     multi_sample = _sample_balanced(
@@ -199,66 +143,17 @@ def build_fewshot_db(*, rebuild: bool, seed: int) -> dict:
         per_label=FEWSHOT_MULTICLASS_MAX_PER_LABEL,
         seed=seed,
     )
-    bin_sample = _sample_balanced(
-        bin_pool,
-        labels=list(BINARY_LABELS),
-        per_label=FEWSHOT_BINARY_MAX_PER_CLASS,
-        seed=seed,
-    )
 
-    # Chroma persistence
-    FEWSHOT_CHROMA_PATH.parent.mkdir(parents=True, exist_ok=True)
-    import chromadb
-
-    chroma_client = chromadb.PersistentClient(path=str(FEWSHOT_CHROMA_PATH))
-
-    # Multiclass collection
+    # Export the full pool JSON exactly as before. It is kept only as the pool
+    # the curated examples were picked from; nothing loads it at runtime.
     multi_rows = _export_examples_json(
         multi_sample,
-        head="multiclass",
         path=FEWSHOT_MULTICLASS_EXAMPLES_PATH,
         id_prefix="mc",
     )
-    multi_texts = [row["post"] for row in multi_rows]
-    multi_labels = [row["label"] for row in multi_rows]
-    multi_ids = [row["id"] for row in multi_rows]
-    multi_metas = [
-        {"head": row["head"], "label": row["label"], "source_split": row["source_split"]}
-        for row in multi_rows
-    ]
-    _embed_and_write_collection(
-        chroma_client=chroma_client,
-        collection_name=FEWSHOT_COLLECTION_MULTICLASS,
-        texts=multi_texts,
-        labels=multi_labels,
-        metadatas=multi_metas,
-        ids=multi_ids,
-        rebuild=rebuild,
-    )
 
-    # Binary collection
-    bin_rows = _export_examples_json(
-        bin_sample,
-        head="binary",
-        path=FEWSHOT_BINARY_EXAMPLES_PATH,
-        id_prefix="bin",
-    )
-    bin_texts = [row["post"] for row in bin_rows]
-    bin_labels = [row["label"] for row in bin_rows]
-    bin_ids = [row["id"] for row in bin_rows]
-    bin_metas = [
-        {"head": row["head"], "label": row["label"], "source_split": row["source_split"]}
-        for row in bin_rows
-    ]
-    _embed_and_write_collection(
-        chroma_client=chroma_client,
-        collection_name=FEWSHOT_COLLECTION_BINARY,
-        texts=bin_texts,
-        labels=bin_labels,
-        metadatas=bin_metas,
-        ids=bin_ids,
-        rebuild=rebuild,
-    )
+    # The vector DB is built from the hand-curated subset only.
+    curated_summary = curated_builder.build_curated_fewshot_collection(rebuild=rebuild)
 
     meta = {
         "artifact": "fewshot_db",
@@ -266,22 +161,20 @@ def build_fewshot_db(*, rebuild: bool, seed: int) -> dict:
         "embedding_model": EMBEDDING_MODEL,
         "collections": {
             "multiclass": {
-                "collection_name": FEWSHOT_COLLECTION_MULTICLASS,
+                "collection_name": None,
+                "note": "Pool JSON export only; vectors live in the curated collection.",
                 "examples_json": str(FEWSHOT_MULTICLASS_EXAMPLES_PATH),
                 "per_label": FEWSHOT_MULTICLASS_MAX_PER_LABEL,
                 "labels": list(RAG_EVAL_LABELS),
-                "total_vectors": int(len(multi_texts)),
+                "total_vectors": 0,
+                "pool_rows": int(len(multi_rows)),
             },
-            "binary": {
-                "collection_name": FEWSHOT_COLLECTION_BINARY,
-                "examples_json": str(FEWSHOT_BINARY_EXAMPLES_PATH),
-                "per_class": FEWSHOT_BINARY_MAX_PER_CLASS,
-                "labels": list(BINARY_LABELS),
-                "total_vectors": int(len(bin_texts)),
-            },
+            "multiclass_curated": curated_summary,
         },
-        "multiclass_raw_pool_size": int(len(multi_pool)),
-        "binary_raw_pool_size": int(len(bin_pool)),
+        "multiclass_raw_pool_size": pool_stats["cleaned_pool_size"],
+        "eval_holdout_size": pool_stats["eval_holdout_size"],
+        "fewshot_pool_size_after_holdout": pool_stats["fewshot_pool_size"],
+        "rows_dropped_eval_holdout": pool_stats["rows_dropped_eval_holdout"],
         "rebuild": rebuild,
     }
     FEWSHOT_DB_META_PATH.write_text(
@@ -313,15 +206,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # CLI seed currently only affects few-shot sampling because the two eval/dev
-    # builders hardcode their own seeds via config constants. If you want them
+    # CLI seed currently only affects few-shot sampling because the eval/dev
+    # builder hardcodes its own seeds via config constants. If you want them
     # to follow a different seed, edit config and re-run.
     print("=== Rebuild eval/dev ===")
     if args.skip_evals:
         print("Skipping eval/dev rebuild.")
     else:
         runpy.run_path(str(_BUILDERS_DIR / "build_multiclass_dataset.py"), run_name="__main__")
-        runpy.run_path(str(_BUILDERS_DIR / "build_binary_dataset.py"), run_name="__main__")
 
     # Always build few-shot DB (this is the main request).
     print("=== Build few-shot vector DB ===")
@@ -332,4 +224,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

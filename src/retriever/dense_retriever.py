@@ -84,7 +84,14 @@ def search_icd11(
         doc = results["documents"][0][i]
         dist = results["distances"][0][i]
         rows.append({
-            "id": f"{meta['disorder_code']}_{meta['section'].lower().replace(' ', '_')}",
+            # Must match the id utils.load_chunks assigns on the BM25 side so
+            # hybrid RRF can fuse rows for the same chunk. Prefer the stored
+            # chunk_uid; rebuild the part-aware form for legacy indexes.
+            "id": meta.get("chunk_uid") or (
+                f"{meta['disorder_code']}_"
+                f"{meta['section'].lower().replace(' ', '_')}_"
+                f"p{meta.get('chunk_part') or 1}"
+            ),
             "text": doc,
             "prompt_text": doc,
             "dense_score": 1 - dist,

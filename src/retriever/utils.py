@@ -9,8 +9,7 @@ from nltk.stem import PorterStemmer  # type: ignore
 
 from components.config import (
     CHUNKS_PATH,
-    FEWSHOT_BINARY_EXAMPLES_PATH,
-    FEWSHOT_MULTICLASS_EXAMPLES_PATH,
+    FEWSHOT_MULTICLASS_CURATED_EXAMPLES_PATH,
     resolve_path,
 )
 
@@ -34,9 +33,16 @@ def load_chunks(json_path: str | Path | None = None) -> list[dict]:
             raise ValueError(f"Invalid JSON in knowledge base file: {e}") from e
 
     for chunk in chunks:
-        chunk["id"] = (
+        # Prefer the globally unique chunk_uid assigned at chunking time.
+        # Previously ids were rebuilt here as <code>_<section> only, so every
+        # part of a multi-part section (and every distinct block sharing a
+        # code/section pair) collapsed to one id — de-duplication in the BM25
+        # and dense paths then kept a single chunk and discarded the rest.
+        # The part-aware fallback covers chunk JSONs built before chunk_uid.
+        chunk["id"] = chunk.get("chunk_uid") or (
             f"{chunk.get('disorder_code', 'unknown')}_"
-            f"{chunk.get('section', 'unknown').lower().replace(' ', '_')}"
+            f"{chunk.get('section', 'unknown').lower().replace(' ', '_')}_"
+            f"p{chunk.get('chunk_part') or 1}"
         )
         # Keep original short text for prompt injection.
         chunk["prompt_text"] = chunk.get("text", "")
@@ -51,15 +57,18 @@ def load_fewshot_examples(
     *,
     head: str | None = None,
 ) -> list[dict]:
-    """Load few-shot example rows exported by rebuild_all_artifacts.py."""
+    """
+    Load few-shot example rows.
+
+    Defaults to the hand-curated store (multiclass_examples_curated.json);
+    pass json_path explicitly to load the full auto-sampled store instead.
+    """
+    if head is not None and head != "multiclass":
+        raise ValueError(f"Unsupported few-shot head: {head!r} (only 'multiclass' is available)")
     if json_path is None:
-        if head == "binary":
-            path = FEWSHOT_BINARY_EXAMPLES_PATH
-        else:
-            path = FEWSHOT_MULTICLASS_EXAMPLES_PATH
+        path = FEWSHOT_MULTICLASS_CURATED_EXAMPLES_PATH
     else:
-        default = FEWSHOT_BINARY_EXAMPLES_PATH if head == "binary" else FEWSHOT_MULTICLASS_EXAMPLES_PATH
-        path = resolve_path(json_path, default)
+        path = resolve_path(json_path, FEWSHOT_MULTICLASS_CURATED_EXAMPLES_PATH)
 
     if not path.exists():
         raise FileNotFoundError(f"Few-shot examples file not found: {path}")
@@ -72,8 +81,7 @@ def load_fewshot_examples(
 
     for row in rows:
         row["text"] = row.get("text") or row.get("post", "")
-        row["post"] = row.get("post") or row.get("text", "")
-        row["id"] = row.get("id") or f"{row.get('head', head or 'fewshot')}_{row.get('label', 'unknown')}"
+        row["id"] = row.get("id") or f"fewshot_{row.get('label', 'unknown')}"
     return rows
 
 

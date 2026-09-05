@@ -1,31 +1,39 @@
 {
   "artifact": "fewshot_db",
-  "binary_raw_pool_size": 210923,
   "collections": {
-    "binary": {
-      "collection_name": "fewshot_binary",
-      "examples_json": "/Users/sidemoctardialla/Desktop/AI-group-project-2026/knowledge_base/fewshot/binary_examples.json",
-      "labels": [
-        "suicide",
-        "non-suicide"
-      ],
-      "per_class": 200,
-      "total_vectors": 400
-    },
     "multiclass": {
-      "collection_name": "fewshot_multiclass",
-      "examples_json": "/Users/sidemoctardialla/Desktop/AI-group-project-2026/knowledge_base/fewshot/multiclass_examples.json",
+      "collection_name": null,
+      "examples_json": "C:\\Users\\Ramy\\AI-group-project-2026\\knowledge_base\\fewshot\\multiclass_examples.json",
       "labels": [
         "suicidal",
         "depression",
         "normal"
       ],
+      "note": "Pool JSON export only; vectors live in the curated collection.",
       "per_label": 200,
-      "total_vectors": 600
+      "total_vectors": 0
+    },
+    "multiclass_curated": {
+      "collection_name": "fewshot_multiclass_curated",
+      "examples_json": "/Users/omarhalasa/Desktop/AI Group Project/Github/AI-group-project-2026/knowledge_base/fewshot/multiclass_examples_curated.json",
+      "labels": [
+        "suicidal",
+        "depression",
+        "normal"
+      ],
+      "per_label": {
+        "depression": 20,
+        "normal": 20,
+        "suicidal": 20
+      },
+      "total_vectors": 60
     }
   },
   "embedding_model": "FremyCompany/BioLORD-2023",
+  "eval_holdout_size": 450,
+  "fewshot_pool_size_after_holdout": 36554,
   "multiclass_raw_pool_size": 37004,
   "rebuild": true,
+  "rows_dropped_eval_holdout": 450,
   "seed": 1337
 }

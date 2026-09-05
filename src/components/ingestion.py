@@ -116,8 +116,11 @@ def run_ingestion(
 
         texts_to_embed = [c["embed_text"] for c in batch]
 
+        # Use the chunker-assigned globally unique uid as the ChromaDB id,
+        # falling back to the legacy positional scheme for older chunk JSONs.
         ids = [
-            f"{c['disorder_code']}_{c['section'].replace(' ', '_').replace('/', '_')}_{i + j}"
+            c.get("chunk_uid")
+            or f"{c['disorder_code']}_{c['section'].replace(' ', '_').replace('/', '_')}_{i + j}"
             for j, c in enumerate(batch)
         ]
 
@@ -128,6 +131,10 @@ def run_ingestion(
                 "disorder_name": c["disorder_name"],
                 "section":       c["section"],
                 "word_count":    c["word_count"],
+                # Dense results must carry the same id the BM25 side assigns
+                # (utils.load_chunks), because hybrid RRF fuses rows by id.
+                "chunk_part":    c.get("chunk_part") or 1,
+                "chunk_uid":     c.get("chunk_uid") or "",
             }
             for c in batch
         ]

@@ -106,11 +106,13 @@ def load_raw_frames() -> tuple[pd.DataFrame, dict]:
         )
         from datasets import load_dataset
 
+        from components.config import HF_HUB_TRAIN_FILE, HF_HUB_TEST_FILE
+
         ds = load_dataset(
             HF_DATASET_REPO,
             data_files={
-                "train": HF_TRAIN_FILE,
-                "test": HF_TEST_FILE,
+                "train": HF_HUB_TRAIN_FILE,
+                "test": HF_HUB_TEST_FILE,
             },
         )
         train_df = ds["train"].to_pandas()

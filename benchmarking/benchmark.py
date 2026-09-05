@@ -221,7 +221,7 @@ def main():
         print("No successful runs — nothing to summarise.")
         return
 
-    with open(OUT_CSV, "w", newline="") as f:
+    with open(OUT_CSV, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)

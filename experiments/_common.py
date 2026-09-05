@@ -1,5 +1,5 @@
 """
-Shared helpers for small pipeline smoke experiments.
+Shared helpers for the experiment scripts in this folder.
 
 Usage from any script in experiments/:
     from _common import bootstrap, SAMPLE_QUERIES, print_hits, load_mood_chunks
@@ -47,8 +47,8 @@ def print_hits(hits: list[dict], *, score_key: str | None = None, limit: int = 5
             )
             text = (hit.get("prompt_text") or hit.get("text") or "").replace("\n", " ")
         else:
-            label = f"{hit.get('label', '?')} | {hit.get('head', 'fewshot')}"
-            text = (hit.get("post") or hit.get("text") or "").replace("\n", " ")
+            label = f"{hit.get('label', '?')}"
+            text = (hit.get("text") or "").replace("\n", " ")
 
         score_s = f"  score={score:.4f}" if isinstance(score, (int, float)) else ""
         print(f"  [{i}]{score_s}  {label}")

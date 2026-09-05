@@ -6,14 +6,14 @@
     "depression",
     "normal"
   ],
-  "output_csv": "/Users/sidemoctardialla/Desktop/AI-group-project-2026/datasets/processed/multiclass_dev.csv",
+  "output_csv": "/Users/omarhalasa/Desktop/AI Group Project/Github/AI-group-project-2026/datasets/processed/multiclass_dev.csv",
   "output_label_counts": {
     "depression": 10,
     "normal": 10,
     "suicidal": 10
   },
   "output_rows": 30,
-  "parent_csv": "/Users/sidemoctardialla/Desktop/AI-group-project-2026/datasets/processed/multiclass_eval.csv",
+  "parent_csv": "/Users/omarhalasa/Desktop/AI Group Project/Github/AI-group-project-2026/datasets/processed/multiclass_eval.csv",
   "parent_row_ids": [
     "rag_0000",
     "rag_0030",

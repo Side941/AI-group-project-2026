@@ -1,24 +1,25 @@
+# Exact pins are versions the pipeline was verified on; >= entries are minimums
+# for packages added later and not pinned to a verified build.
+
+# Core pipeline: knowledge base, retrieval, datasets
 nltk==3.9.4
 numpy==2.1.3
 pandas==2.2.3
 datasets==3.6.0
 rank-bm25==0.2.2
 sentence-transformers==4.1.0
-faiss-cpu==1.14.3
 chromadb
 tqdm
-openpyxl
+torch>=2.2
 
+# Experiment notebooks: metrics, significance tests, plots
+ipykernel
+matplotlib>=3.8
+seaborn>=0.13
+scikit-learn>=1.4
+statsmodels>=0.14
 
-
-
-
-
-
-
-
-
-
-
-
-
+# External baseline only (external_model/mentalroberta_baseline.py).
+# accelerate is required by transformers.Trainer for PyTorch training.
+transformers>=4.44
+accelerate>=0.26

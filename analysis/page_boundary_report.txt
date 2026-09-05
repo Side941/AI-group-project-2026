@@ -30,7 +30,7 @@ no chunks added — the extra pages contribute nothing under the current chunker
 VARIANT start=95: pages 95-694  (baseline 109-694)
 ==============================================================================
 chunks: baseline 1569 -> variant 1579 (+7 added, 0 removed)
-added, by code: {'6C4G.73': 1, '6E40.Z': 1, '6D70.1': 1, '6E66': 1, '6D72.11': 1, '6D8Z': 1, '6D86.Z': 1}
+added, by code: {'6D72.11': 1, '6D70.1': 1, '6C4G.73': 1, '6E40.Z': 1, '6D8Z': 1, '6E66': 1, '6D86.Z': 1}
 added chunks mentioning suicid*/self-harm: 0
 added chunks passing the CURRENT retrieval filter (mood prefixes x ['Essential Features', 'Boundary with Normality']): 0
   -> retrieval pool unchanged: with the current filter, these

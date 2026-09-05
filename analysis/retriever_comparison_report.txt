@@ -8,9 +8,9 @@ Pool: 28 chunks | sections ['Essential Features', 'Boundary with Normality'] | s
  the comparison between them remains fair.)
 
   retriever   init+warmup (s)  approx. +memory (MB)
-  bm25                   0.07                   2.5
-  dense                  7.26                 664.4
-  hybrid                 0.12                   1.2
+  bm25                   0.06                   0.7
+  dense                 26.93                 282.3
+  hybrid                 0.13                   0.0
   (memory = peak-RSS delta around init+first query; coarse, order-
    dependent, but captures the encoder cost that dominates dense.)
 
@@ -18,33 +18,33 @@ Pool: 28 chunks | sections ['Essential Features', 'Boundary with Normality'] | s
 PART 1 — SUICID* CHUNK RETRIEVAL (safety-critical target)
 ==============================================================================
   retriever class         hit rate  MRR(suicid*)
-  bm25      suicidal          3/10         0.250
-  bm25      depression        7/10         0.483
-  bm25      normal            2/10         0.150
+  bm25      suicidal          5/10         0.317
+  bm25      depression        7/10         0.458
+  bm25      normal            2/10         0.133
 
-  dense     suicidal          9/10         0.767
-  dense     depression        6/10         0.325
-  dense     normal            2/10         0.133
+  dense     suicidal          9/10         0.617
+  dense     depression        5/10         0.295
+  dense     normal            2/10         0.083
 
-  hybrid    suicidal          9/10         0.900
-  hybrid    depression        6/10         0.600
-  hybrid    normal            2/10         0.200
+  hybrid    suicidal          9/10         0.667
+  hybrid    depression        5/10         0.375
+  hybrid    normal            2/10         0.150
 
 
 ==============================================================================
 PART 2 — WHAT EACH RETRIEVER RETURNS (disorder-code profile, all classes)
 ==============================================================================
-  bm25      : 6A8Z(40), 6A72(22), 6A73(12), 6A62(9), 6A7Y(8), 6A6Y(6)
-  dense     : 6A8Z(24), 6B41(10), 6A72(10), 6B23(7), 6D50(6), 6B24(5)
-  hybrid    : 6A8Z(24), 6A72(10), 6B41(10), 6B23(7), 6D50(6), 6B24(5)
+  bm25      : EP.HYP(33), EP.DEP(27), EP.MAN(22), 6A72(13), 6A73(7), 6A62(5)
+  dense     : EP.DEP(20), 6A72(12), 6B23(10), 6B41(7), 6B24(6), 6D50(5)
+  hybrid    : EP.DEP(20), 6A72(12), 6B23(10), 6B41(7), 6B24(6), 6D50(5)
 
 ==============================================================================
 PART 3 — QUERY LATENCY AND WITHIN-RETRIEVER SCORE SHAPE
 ==============================================================================
   retriever    mean (ms)   p95 (ms)   median top1->top5 margin
-  bm25               0.7        1.5                       56%
-  dense             95.9      133.7                      nan%
-  hybrid            94.2      128.7                       32%
+  bm25               0.7        1.5                       39%
+  dense             95.1      130.7                       14%
+  hybrid            90.4      127.2                        6%
   Margin = (top1 - top5) / top1 within each retriever's own score scale.
   Raw scores are NOT comparable across retrievers (term-weight sums vs
   cosine similarity vs RRF rank sums); only rank-based metrics above are.
@@ -53,8 +53,8 @@ PART 3 — QUERY LATENCY AND WITHIN-RETRIEVER SCORE SHAPE
 PART 4 — TOP-5 OVERLAP BETWEEN RETRIEVERS (mean Jaccard)
 ==============================================================================
   pair                suicidal  depression      normal         all
-  bm25 vs dense           0.23        0.12        0.03        0.13
-  bm25 vs hybrid          0.23        0.12        0.03        0.13
+  bm25 vs dense           0.09        0.06        0.01        0.05
+  bm25 vs hybrid          0.09        0.06        0.01        0.05
   dense vs hybrid         1.00        1.00        1.00        1.00
   Low BM25-vs-dense overlap = the two see different evidence = the
   empirical case for hybrid fusion; high overlap = hybrid adds little.

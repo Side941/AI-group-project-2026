@@ -81,6 +81,28 @@ DISORDER_CODE_RE = re.compile(
     re.MULTILINE,
 )
 
+# ── Mood episode descriptions ─────────────────────────────────────────────────
+# The CDDR mood chapter opens with descriptions of the four mood *episodes*
+# (depressive, manic, mixed, hypomanic) before any coded disorder entry.
+# These headings carry no ICD-11 code, so the plain code-tracking loop
+# mis-attributed all of their content to the last code seen in the chapter's
+# category listing (6A8Z, "Mood disorder, unspecified"). Episodes are the
+# clinical building blocks the disorders are defined in terms of — the
+# depressive-episode Essential Features (including the suicidal ideation item)
+# are the single most relevant retrieval content for depression/suicide-risk
+# classification — so they get their own pseudo-codes under the "EP." prefix.
+# Case-sensitive and end-anchored: a layout-wrapped sentence fragment such as
+# "hypomanic episode" (lower-case, or mid-sentence) must not match.
+EPISODE_HEADING_RE = re.compile(r"^(Depressive|Manic|Mixed|Hypomanic) episode$")
+EPISODE_SECTION_MARKER_RE = re.compile(r"^Mood episode descriptions$", re.IGNORECASE)
+EPISODE_CODES = {
+    "Depressive": "EP.DEP",
+    "Manic":      "EP.MAN",
+    "Mixed":      "EP.MIX",
+    "Hypomanic":  "EP.HYP",
+}
+EPISODE_DOMAIN = "Mood disorders"
+
 # Continuation of a layout-wrapped differential-diagnosis heading.
 DIFF_HEADING_CONTINUATION_RE = re.compile(
     r"^diagnosis\)(?:\s|$)",
@@ -406,6 +428,24 @@ def chunk_text(full_text: str) -> list[dict]:
             current_lines         = [current_disorder_name]
             continue
 
+        # Mood episode descriptions: uncoded headings inside the mood chapter.
+        # Guarded on the current domain so an identical line elsewhere in the
+        # 600-page document can never start an episode block.
+        if current_domain == EPISODE_DOMAIN:
+            if EPISODE_SECTION_MARKER_RE.match(cleaned):
+                flush()
+                continue
+            episode_match = EPISODE_HEADING_RE.match(cleaned)
+            if episode_match:
+                flush()
+                episode = episode_match.group(1)
+                current_disorder_code = EPISODE_CODES[episode]
+                current_disorder_name = f"{episode} episode"
+                current_domain        = EPISODE_DOMAIN
+                current_section       = "Overview"
+                current_lines         = [current_disorder_name]
+                continue
+
         # Skip second half of a layout-wrapped differential-diagnosis heading.
         if DIFF_HEADING_CONTINUATION_RE.match(cleaned):
             continue
@@ -521,6 +561,29 @@ def postprocess(
 
 # ── Pipeline entry point ───────────────────────────────────────────────────────
 
+def assign_chunk_uids(chunks: list[dict]) -> None:
+    """
+    Assign a stable, globally unique id to every chunk, in place.
+
+    Base form: <disorder_code>_<section>_p<part>. When the same
+    (code, section, part) triple occurs more than once — e.g. a code that
+    appears in both a chapter listing and its actual entry — an occurrence
+    suffix (_2, _3, …) disambiguates. The uid is stored in the chunks JSON
+    and in ChromaDB metadata so BM25, dense and hybrid all share one id per
+    chunk instead of rebuilding (and colliding on) <code>_<section>.
+    """
+    seen: dict[str, int] = {}
+    for c in chunks:
+        base = (
+            f"{c.get('disorder_code', 'unknown')}_"
+            f"{c.get('section', 'unknown').lower().replace(' ', '_')}_"
+            f"p{c.get('chunk_part') or 1}"
+        )
+        n = seen.get(base, 0) + 1
+        seen[base] = n
+        c["chunk_uid"] = base if n == 1 else f"{base}_{n}"
+
+
 def run_chunking(
     pdf_path: str   = PDF_PATH,
     chunks_path: str = CHUNKS_PATH,
@@ -551,6 +614,8 @@ def run_chunking(
 
     chunks = filter_junk_chunks(chunks)
     print(f"  Final chunks: {len(chunks)}")
+
+    assign_chunk_uids(chunks)
 
     print_validation_report(chunks)
 
