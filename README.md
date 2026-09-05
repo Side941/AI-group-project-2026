@@ -1,59 +1,147 @@
-# AI Group Project 2026 — Depression / Suicide-Risk RAG Pipeline
+# AI Group Project 2026 — Depression / Suicide-Risk Detection with RAG
 
-Prompted RAG classifiers over ICD-11 clinical criteria (Qwen via Ollama). The repo is organized so a first-time runner can distinguish:
+Can a small, locally-run language model classify social-media posts as **suicidal**,
+**depression** or **normal** *and* justify itself against real clinical criteria?
 
-- `datasets/raw/` for source CSVs
-- `datasets/processed/` for derived eval/dev CSVs and their provenance meta JSON
-- `results/` for notebook experiment outputs
-- `knowledge_base/` for ICD-11 assets (`icd_11/`) plus the few-shot store
-- `src/builders/` for runnable build scripts
+This repo answers that with a retrieval-augmented generation (RAG) pipeline: ICD-11
+clinical descriptions (the WHO CDDR) are chunked into a vector store, the most relevant
+diagnostic criteria are retrieved for each post, and a Qwen3 model running locally under
+Ollama produces a label plus a justification that cites the retrieved evidence. A
+nine-phase ablation isolates the contribution of each component, and the final system is
+compared against a supervised fine-tuned MentalRoBERTa baseline on the same held-out set.
 
-## Quick orientation
+**Labels:** `suicidal`, `depression`, `normal` (the source corpus's `anxiety` class is
+excluded).
 
-| Workflow | Script | Notebook | Main output |
-|----------|--------|----------|-------------|
-| KB build | `src/builders/run_kb_pipeline.py` | `notebooks/01_kb_pipeline_demo.ipynb` | `knowledge_base/icd_11/chroma_db/` |
-| Multiclass dataset prep | `src/builders/build_multiclass_dataset.py` | `notebooks/02_multiclass_dataset_prep.ipynb` | `datasets/processed/multiclass_*.csv` |
-| Multiclass RAG eval | notebook-driven | `notebooks/03_multiclass_rag.ipynb` | `results/multiclass_*.csv` |
-| Few-shot vector DB | `src/builders/build_curated_fewshot_db.py` | none | `knowledge_base/fewshot/chroma_db/` |
-| Rebuild everything + few-shot DB | `src/builders/rebuild_all_artifacts.py` | none | processed CSVs + `knowledge_base/fewshot/` |
+## Contents
 
-## Project structure
+- [How the pipeline works](#how-the-pipeline-works)
+- [Headline results](#headline-results)
+- [Repository layout](#repository-layout)
+- [Prerequisites](#prerequisites)
+- [Reproducing the results](#reproducing-the-results)
+- [The two notebooks](#the-two-notebooks)
+- [Output files](#output-files)
+- [Datasets](#datasets)
+- [Knowledge base and few-shot store](#knowledge-base-and-few-shot-store)
+- [Supporting scripts](#supporting-scripts)
+- [Known limitations](#known-limitations)
+- [Generative AI use](#generative-ai-use)
+
+## How the pipeline works
+
+For each post:
+
+1. **Retrieve** candidate ICD-11 chunks with a hybrid retriever — BM25 fused with dense
+   BioLORD embeddings via weighted RRF (`alpha = 0.3`).
+2. **Scope** the results to mood- and risk-related ICD-11 code prefixes
+   (`6A6`, `6A7`, `6A8`, `EP.`, `6B42`, `6B43`, `6D11`), so unrelated chapters cannot
+   crowd out the relevant criteria.
+3. **Expand** each retrieved chunk to its sibling sections (Essential Features and
+   Boundary with Normality) so a criterion is never shown half-truncated.
+4. **Prompt** `qwen3:1.7b` zero-shot with the post and the retrieved evidence, requiring a
+   `Label:` and a `Justification:` that cites the ICD-11 material.
+5. **Parse and score** the response: accuracy and macro-F1 for classification, plus manual
+   grounding criteria C1 (is the citation valid), C2 (is the retrieved category relevant)
+   and C3 (is the retrieved content relevant).
+
+That configuration is not assumed — it is the outcome of the ablation in
+`notebooks/analysis.ipynb`, where every component was varied one at a time.
+
+## Headline results
+
+Final configuration, 450-post held-out evaluation set, three identical runs (Phase 9):
+
+| System | Accuracy | Macro-F1 | Suicidal recall |
+|--------|----------|----------|-----------------|
+| RAG pipeline (Qwen3 1.7B, hybrid + scoped, k=5) | 0.678 | 0.644 | 0.787 |
+| MentalRoBERTa, supervised fine-tune | 0.871 | 0.871 | 0.860 |
+
+The three RAG runs agreed on 100% of predictions, so the pipeline is deterministic at
+`seed=42`. The supervised baseline is significantly more accurate overall (McNemar's exact
+test on 450 paired outcomes, p ≈ 0; paired bootstrap on the accuracy difference −0.193,
+95% CI [−0.240, −0.149]), but the gap on **suicidal recall alone** is not significant
+(p = 0.108, n = 150) — and MentalRoBERTa needs ~9,000 labelled training posts and produces
+no auditable justification, whereas the RAG system trains nothing and cites its evidence.
+
+## Repository layout
 
 ```text
 AI-group-project-2026/
 ├── datasets/
-│   ├── raw/                     # Source CSVs / local caches
-│   └── processed/               # Derived eval/dev CSVs + meta JSON
-├── knowledge_base/              # Vector stores + source docs
-│   ├── icd_11/                  # ICD-11 PDF, chunks, dense Chroma store
-│   │   ├── icd_11.pdf
-│   │   ├── icd11_chunks.json
-│   │   └── chroma_db/
-│   └── fewshot/                 # Few-shot store (curated JSON + Chroma DB)
-│       ├── multiclass_examples.json          # Full auto-sampled pool (not used at runtime)
-│       ├── multiclass_examples_curated.json  # Hand-curated store (used by retrievers)
-│       └── chroma_db/                        # Dense vectors for the curated store
-├── notebooks/                   # Human-facing walkthroughs / experiments
-│   ├── 01_kb_pipeline_demo.ipynb
-│   ├── 02_multiclass_dataset_prep.ipynb
-│   ├── 03_multiclass_rag.ipynb
-│   └── analysis.ipynb
-├── analysis/                    # Retriever/chunking analysis scripts + reports
-├── experiments/                 # Standalone experiment scripts (.py)
-├── results/                     # Notebook experiment output CSVs
+│   ├── raw/                  # Source corpus cache (gitignored, auto-downloaded)
+│   └── processed/            # Committed eval/dev splits + provenance meta JSON
+├── knowledge_base/
+│   ├── icd_11/               # ICD-11 chunks (committed), PDF + Chroma store (gitignored)
+│   └── fewshot/              # Few-shot example store (gitignored, rebuildable)
+├── notebooks/
+│   ├── analysis.ipynb                # Main experiment: ablation Phases 1–9
+│   └── 05_external_comparison.ipynb  # RAG vs MentalRoBERTa comparison
 ├── src/
-│   ├── builders/                # Dataset + KB + few-shot build scripts
-│   ├── components/              # Config, chunker, ingestion
-│   └── retriever/               # BM25, dense, hybrid, few-shot retrievers
-├── rag_system_blueprint.html
-├── requirements.txt
-└── README.md
+│   ├── components/           # Config, PDF chunker, Chroma ingestion
+│   ├── retriever/            # BM25, dense, hybrid, few-shot, section expander
+│   ├── builders/             # Build scripts for the KB, datasets and few-shot store
+│   └── evaluation/           # Paired significance testing + winner-selection rule
+├── external_model/           # MentalRoBERTa supervised baseline
+├── analysis/                 # Standalone pre-experiment scripts + their .txt reports
+├── experiments/              # Few-shot RAG prompt-inspection script
+├── benchmarking/             # Early model/latency benchmarks (historical)
+├── scripts/                  # KB snapshot tool + few-shot curation helper
+├── results/                  # All experiment outputs
+├── KNOWN_ISSUES.md           # Knowledge-base defect report (KB v1)
+└── requirements.txt
 ```
 
-All paths resolve from the repo root through `src/components/config.py`.
+All filesystem paths resolve from the repo root via `src/components/config.py`, so scripts
+and notebooks work regardless of the directory you launch them from.
 
-## Setup
+Only the two notebooks listed above are part of the reported pipeline. Any other notebook
+files present in `notebooks/` are earlier exploratory work and are not used to produce the
+results in this README.
+
+## Prerequisites
+
+### Python packages
+
+```bash
+pip install -r requirements.txt
+```
+
+This covers everything: the core retrieval pipeline, the notebook analysis stack
+(matplotlib, seaborn, scikit-learn, statsmodels) and the MentalRoBERTa baseline
+(transformers, accelerate). NLTK's `punkt` and `stopwords` corpora download automatically
+on first use.
+
+### Ollama
+
+The RAG notebook talks to Ollama over plain HTTP at `http://localhost:11434`; there is no
+Python client dependency. Install Ollama, then:
+
+```bash
+ollama pull qwen3:1.7b
+ollama pull qwen3:0.6b   # only needed for the Phase 5 model-size ablation
+```
+
+### poppler / `pdftotext`
+
+Only needed if you rebuild the knowledge base from the PDF. `src/components/chunker.py`
+shells out to `pdftotext`:
+
+```bash
+conda install -c conda-forge poppler
+```
+
+### Files you must supply yourself
+
+| Path | How to obtain | Needed for |
+|------|---------------|------------|
+| `knowledge_base/icd_11/icd_11.pdf` | The WHO ICD-11 CDDR PDF. Not redistributed here for copyright reasons — place your own copy at this path. | Rebuilding the KB from scratch |
+| Hugging Face account with access to `mental/mental-roberta-base` | The model is gated; run `huggingface-cli login` after requesting access. | MentalRoBERTa baseline only |
+
+The raw corpus under `datasets/raw/` downloads automatically from the Hugging Face dataset
+`ourafla/Mental-Health_Text-Classification_Dataset` if it is missing.
+
+## Reproducing the results
 
 ```bash
 git clone https://github.com/Side941/AI-group-project-2026.git
@@ -61,147 +149,253 @@ cd AI-group-project-2026
 pip install -r requirements.txt
 ```
 
-Also needed locally:
+Then work through the steps below. Steps 1–3 build artifacts that are gitignored, so a
+fresh clone needs all of them before the notebooks will run.
 
-| Path | Role |
-|------|------|
-| `knowledge_base/icd_11/icd_11.pdf` | Source PDF for chunking |
-| `knowledge_base/icd_11/icd11_chunks.json` | Chunked ICD-11 criteria |
-| `knowledge_base/icd_11/chroma_db/` | Dense ICD-11 vector store |
-| Ollama + `qwen3:0.6b` / `qwen3:1.7b` | LLM inference for notebooks |
+### Step 1 — Build the ICD-11 knowledge base
 
-The multiclass raw caches under `datasets/raw/` are created automatically if missing.
+Chunks the PDF and embeds the chunks into Chroma. Requires `icd_11.pdf` and `pdftotext`.
 
-## Datasets
+```bash
+python src/builders/run_kb_pipeline.py
+```
 
-### Multiclass
+Produces `knowledge_base/icd_11/icd11_chunks.json` (1,581 chunks, already committed) and
+the Chroma collection `icd11_clinical` under `knowledge_base/icd_11/chroma_db/`.
 
-Raw/cache inputs:
-- `datasets/raw/mental_health_train.csv`
-- `datasets/raw/mental_health_test.csv`
+Because the chunks JSON is committed, you can skip re-chunking and only build the vector
+store — this avoids needing the PDF at all:
 
-Processed outputs:
-- `datasets/processed/multiclass_eval.csv` — 450 posts (150/class)
-- `datasets/processed/multiclass_dev.csv` — 30 posts (10/class)
-- `datasets/processed/multiclass_eval.meta.json`
-- `datasets/processed/multiclass_dev.meta.json`
+```bash
+python src/builders/run_kb_pipeline.py --skip-chunking
+python src/builders/run_kb_pipeline.py --rebuild        # force re-ingest from scratch
+```
 
-Labels: `suicidal`, `depression`, `normal`  
-Excluded: `anxiety`
+Embedding uses `FremyCompany/BioLORD-2023` on GPU when available, CPU otherwise.
 
-Build or rebuild:
+### Step 2 — Build the evaluation splits
+
+Both split CSVs are committed, so this is only needed if you want to regenerate them:
 
 ```bash
 python src/builders/build_multiclass_dataset.py
 ```
 
-## Few-shot store
+### Step 3 — Build the few-shot store
 
-`knowledge_base/fewshot/` holds two example files with different roles:
+`knowledge_base/fewshot/` is gitignored in its entirety, so this step is required on a
+fresh clone even though only Phase 3 uses few-shot prompting:
 
-- `multiclass_examples.json` — the full auto-sampled pool (200/class, deterministic
-  seed, eval posts held out). Regenerated by `rebuild_all_artifacts.py` but **not
-  used at runtime**; it is kept only as the pool the curated examples were picked from.
-- `multiclass_examples_curated.json` — 20 hand-verified posts per class (the full
-  pool contains label noise). This is what every few-shot retriever uses: BM25 loads
-  it directly, and dense retrieval queries the `fewshot_multiclass_curated` Chroma
+```bash
+python src/builders/rebuild_all_artifacts.py     # sampled pool + curated Chroma vectors
+python scripts/make_curated_fewshot.py           # curated JSON from the pool
+python src/builders/build_curated_fewshot_db.py  # embed the curated JSON
+```
+
+`rebuild_all_artifacts.py` regenerates the eval/dev CSVs too; pass `--skip-evals` to leave
+them alone, and `--reuse-fewshot-db` to skip re-embedding when the vector counts already
+match. Eval posts are held out of the few-shot pool, so retrieved examples cannot leak into
+evaluation. Provenance is written to `datasets/processed/fewshot_db.meta.json`.
+
+BM25 few-shot retrieval reads the curated JSON directly and needs no build step; only the
+dense path needs the Chroma collection.
+
+### Step 4 — Run the ablation
+
+Start Ollama, then run `notebooks/analysis.ipynb` (see below for how it is structured).
+
+### Step 5 — Run the external baseline and comparison
+
+```bash
+huggingface-cli login
+python external_model/mentalroberta_baseline.py
+```
+
+Then run `notebooks/05_external_comparison.ipynb`.
+
+## The two notebooks
+
+### `notebooks/analysis.ipynb` — the main experiment
+
+A nine-phase ablation. Phases 1–8 run on the 30-post dev split so that every response can
+be manually graded for grounding; Phase 9 runs the winning configuration on the full
+450-post evaluation set.
+
+Each phase varies exactly one component and keeps everything else at the configuration
+inherited from earlier phases. The starting baseline is `qwen3:1.7b`, `k=5`, zero-shot,
+thinking off, expand strategy, full ICD-11 knowledge base.
+
+| Phase | Varies | Outcome | Output |
+|-------|--------|---------|--------|
+| 1 | Retriever: BM25 / dense / hybrid | Hybrid — best grounding | `results/phase1_grounding_review.csv` |
+| 2 | Scoped mood-code filter vs full KB | Scoped filter kept | `results/phase2_hybrid_scoped.csv` |
+| 3 | Dynamic few-shot vs zero-shot | Zero-shot kept | `results/phase3_fewshot_scoped.csv` |
+| 4 | Qwen3 thinking mode on/off | Thinking rejected | `results/phase4_thinking.csv` |
+| 5 | `qwen3:0.6b` vs `qwen3:1.7b` | 1.7B kept | `results/phase5_06b.csv` |
+| 6 | Section expansion vs flat top-k | Expansion kept | `results/phase6_flat.csv` |
+| 7 | `k` = 3 and 8 vs 5 | k=5 kept | `results/phase7_k_check.csv` |
+| 8 | RAG vs a fair no-retrieval prompt | RAG kept | `results/phase8_no_rag_fair.csv` |
+| 9 | Nothing — 3 repeat runs on 450 posts | Final numbers | `results/phase9_run{1,2,3}.csv` |
+
+**Running it.** Execute the setup cells (environment, imports, `CFG`, prompt templates,
+dataset loading, retriever setup, Ollama helpers, phase runner) once, then run the phases
+in order. Phase 2's in-memory `results` variable is the paired baseline for the McNemar
+tests in Phases 3, 4, 6, 7 and 8, so skipping Phase 2 breaks those comparisons. Phase 9 is
+self-contained apart from the setup cells, and switches the dataset to the 450-post eval
+set itself.
+
+**Configuration.** Everything tunable lives in the `CFG` dict in the configuration cell:
+Ollama host and timeout, model list, `seed=42`, `num_predict`, `num_ctx`, `hybrid_alpha`,
+and `eval_mode` (`"dev"` for 30 posts, `"final"` for 450). Phase 4 overrides `num_predict`
+to 2048 and `num_ctx` to 16384 to give thinking mode room.
+
+**Runtime.** Roughly 5–20 s per post for 1.7B with retrieval. A dev phase (30 posts) takes
+a few minutes; Phase 9 is 1,350 generations and takes on the order of three hours.
+
+**Grounding scores** are entered by hand as `manual_scores_phaseN` dicts in the notebook
+and merged into the output CSVs. The `results/p*.txt` files are the raw C1/C2/C3 tally
+sheets from that manual review — the notebook neither reads nor writes them.
+
+The confusion-matrix cell writes `confusion_matrix_rag.png` to the working directory.
+
+### `notebooks/05_external_comparison.ipynb` — RAG vs supervised baseline
+
+A read-only analysis notebook: it runs no models and writes no files. It loads
+`results/phase9_run1.csv` and `results/mentalroberta_eval_predictions.csv`, checks that
+both cover the same 450 posts with the same ground truth, and compares them.
+
+Sections: headline metrics → side-by-side confusion matrices (raw and row-normalised) →
+per-class precision/recall/F1 → significance testing → agreement analysis → cost and
+qualitative trade-offs → notes for the write-up.
+
+Because both systems scored the same posts, the outcomes are paired, so significance uses
+McNemar's exact test and a paired bootstrap on the accuracy difference (10,000 replicates,
+seed 42) from `src/evaluation/selection.py` rather than overlapping per-system confidence
+intervals. The agreement section reports where each system is uniquely correct and the
+resulting oracle ceiling.
+
+Both input CSVs must exist first. The MentalRoBERTa side comes from
+`external_model/mentalroberta_baseline.py`, which fine-tunes `mental/mental-roberta-base`
+with a 3-class head, excludes evaluation posts from training by normalised text hash, and
+writes the predictions CSV:
+
+```bash
+python external_model/mentalroberta_baseline.py            # 9000 train / 1500 val, 3 epochs
+python external_model/mentalroberta_baseline.py --smoke    # 300/150, 1 epoch, pipeline check
+python external_model/mentalroberta_baseline.py --device cpu --epochs 2
+```
+
+Fine-tuning RoBERTa-base on CPU is slow; `--device auto` picks CUDA, then MPS, then CPU.
+If local training is impractical, train on a Colab T4 and copy
+`results/mentalroberta_eval_predictions.csv` back into `results/`. The script runs a
+gradient-flow preflight check (some MPS/transformers combinations silently fail to train)
+and warns if validation accuracy lands near chance.
+
+Note that `mental/mental-roberta-base` is licensed CC BY-NC 4.0 — non-commercial use only.
+
+## Output files
+
+| File | Contents |
+|------|----------|
+| `results/phase1_grounding_review.csv` … `results/phase8_no_rag_fair.csv` | Per-post predictions, retrieved chunks, full model answers and grounding scores for each ablation phase (30 posts per configuration) |
+| `results/phase9_run{1,2,3}.csv` | Final 450-post runs. Columns: `response_id`, `config`, `post_index`, `true_label`, `predicted`, `full_answer`, `retrieved_chunks`, `correct`, `c1`, `c2`, `c3`, `grounding_score` |
+| `results/mentalroberta_eval_predictions.csv` | Baseline predictions with per-class probabilities |
+| `results/p*.txt` | Manual C1/C2/C3 grounding tally sheets, one per phase |
+| `analysis/*_report.txt` | Pre-experiment reports, regenerated by the matching script |
+
+## Datasets
+
+Source corpus: `ourafla/Mental-Health_Text-Classification_Dataset` on Hugging Face, cached
+to `datasets/raw/` (gitignored, downloaded on demand).
+
+Committed, deterministic splits under `datasets/processed/`:
+
+| File | Size | Seed |
+|------|------|------|
+| `multiclass_eval.csv` | 450 posts, 150 per class | 42 |
+| `multiclass_dev.csv` | 30 posts, 10 per class | 43 |
+
+Each has a `.meta.json` recording how it was produced. The dev split is nested inside the
+eval split, and posts are filtered to 40–2000 characters. Regenerate with
+`python src/builders/build_multiclass_dataset.py`.
+
+## Knowledge base and few-shot store
+
+**ICD-11.** `knowledge_base/icd_11/icd11_chunks.json` holds 1,581 chunks covering PDF pages
+92–694 of the CDDR, each carrying a `disorder_code`, `disorder_name`, `section`, `domain`
+and a globally unique `chunk_uid`. The BM25 and hybrid paths index only the two most
+diagnostic sections, Essential Features and Boundary with Normality (361 chunks); the dense
+path queries the full Chroma collection. The mood-episode descriptions
+that open the mood chapter carry no ICD code in the source document, so the chunker assigns
+them pseudo-codes `EP.DEP`, `EP.MAN`, `EP.MIX` and `EP.HYP`.
+
+**Few-shot examples.** `knowledge_base/fewshot/` holds two files with different roles:
+
+- `multiclass_examples.json` — the full auto-sampled pool (200 per class, deterministic
+  seed, eval posts held out). Kept only as provenance for where the curated examples came
+  from; nothing loads it at runtime.
+- `multiclass_examples_curated.json` — 20 hand-verified posts per class, because the full
+  pool contains real label noise. This is what every few-shot retriever uses: BM25 reads
+  the JSON directly, dense retrieval queries the `fewshot_multiclass_curated` Chroma
   collection built from it.
 
-### Rebuilding
+To change which examples are curated, edit `CURATED_IDS` in
+`scripts/make_curated_fewshot.py`, regenerate the JSON, then re-embed it with
+`python src/builders/build_curated_fewshot_db.py`.
 
-Most common — re-embed the curated store into the Chroma collection:
+## Supporting scripts
+
+Pre-experiments that justify design choices. Each needs no Ollama and writes a `.txt`
+report next to itself:
 
 ```bash
-python src/builders/build_curated_fewshot_db.py           # rebuild vectors
-python src/builders/build_curated_fewshot_db.py --reuse   # skip if counts already match
+python analysis/retriever_comparison.py      # BM25 vs dense vs hybrid on the dev split
+python analysis/bm25_suicide_keywords.py     # lexical overlap between posts and ICD-11 text
+python analysis/page_boundary_experiment.py  # PDF page-range study (needs the local PDF)
 ```
 
-Only needed after changing the curated picks — edit `CURATED_IDS` in
-`scripts/make_curated_fewshot.py`, then:
+Inspection and debugging:
 
 ```bash
-python scripts/make_curated_fewshot.py            # regenerate curated JSON from the pool
-python src/builders/build_curated_fewshot_db.py   # re-embed it
-```
-
-Full rebuild (eval/dev CSVs + pool JSON + curated vectors):
-
-```bash
-python src/builders/rebuild_all_artifacts.py
-```
-
-BM25 needs no build step — it reads the curated JSON at runtime. A rebuild is only
-needed for the dense (Chroma) side, or after the curated JSON changes. Provenance is
-recorded in `datasets/processed/fewshot_db.meta.json`.
-
-## Running
-
-### Knowledge-base pipeline
-
-```bash
-python src/builders/run_kb_pipeline.py
-python src/builders/run_kb_pipeline.py --skip-chunking
-python src/builders/run_kb_pipeline.py --rebuild
-```
-
-### Rebuild all datasets + few-shot vector DB
-
-```bash
-python src/builders/rebuild_all_artifacts.py
-```
-
-Useful flags:
-
-```bash
-python src/builders/rebuild_all_artifacts.py --skip-evals        # keep eval/dev CSVs
-python src/builders/rebuild_all_artifacts.py --reuse-fewshot-db  # skip re-embedding
-```
-
-Regenerates the few-shot pool JSON and rebuilds the curated Chroma collection
-(see the "Few-shot store" section above for the store layout and lighter rebuilds).
-
-### Analysis scripts
-
-Standalone scripts under `analysis/` (no Ollama needed); each writes a `.txt` report next to itself:
-
-```bash
-python analysis/retriever_comparison.py     # BM25 vs dense vs hybrid on the dev split
-python analysis/bm25_suicide_keywords.py    # lexical justification for BM25
-python analysis/page_boundary_experiment.py # chunking page-range study (needs local PDF)
-```
-
-### Few-shot retrieval RAG experiment
-
-Dynamic few-shot examples from the curated store (optional ICD-11 context):
-
-```bash
-# Inspect retrieved examples + assembled prompt (no Ollama)
-python experiments/exp_fewshot_rag.py --dry-run
-
-# Full run with few-shot BM25 + ICD-11 BM25
-python experiments/exp_fewshot_rag.py --query depression
-
-# Few-shot hybrid only (no clinical KB)
-python experiments/exp_fewshot_rag.py --kb-retriever none --fewshot-retriever hybrid
-
-# Compare: zero-shot vs few-shot vs few-shot+KB
+python scripts/kb_snapshot.py                    # inventory the chunk pool and dump the
+                                                 # retrieval + prompt context for fixed queries
+python experiments/exp_fewshot_rag.py --dry-run  # show retrieved examples and the assembled
+                                                 # prompt without calling Ollama
 python experiments/exp_fewshot_rag.py --compare --query suicidal
 ```
 
-### Notebooks
+`benchmarking/` holds earlier model and latency benchmarks kept for the record; they are
+not part of the reported results.
 
-Run the first path-setup cell before anything else:
+## Known limitations
 
-- `notebooks/01_kb_pipeline_demo.ipynb`
-- `notebooks/02_multiclass_dataset_prep.ipynb`
-- `notebooks/03_multiclass_rag.ipynb`
-- `notebooks/analysis.ipynb` — RAG configuration grid (retriever, top-k, prompt, thinking, model size)
+- **Corpus.** Labels come from a single social-media corpus with self-reported/derived
+  labels; they are not clinical diagnoses. The comparison notebook's write-up section flags
+  this explicitly.
+- **Scope.** This is a research artifact for a coursework project. It is not a clinical
+  tool and must not be used to make decisions about real people.
 
-Current experiment outputs are written under `results/`.
+## Generative AI use
 
-## Notes
+Generative AI tools were used during development of this project. They are declared here
+in full:
 
-- Retrievers: `bm25`, `dense`, `hybrid` (weighted RRF).
-- The multiclass classifier currently retrieves only from the ICD-11 KB in the notebook.
-- Few-shot retrieval (experiments and `notebooks/analysis.ipynb`) runs over the hand-curated store; the full auto-sampled pool is kept for provenance only.
-- CPU is the default fallback; GPU is used when available for embeddings.
+| Tool | Used for |
+|------|----------|
+| ChatGPT (OpenAI) | Explaining concepts, drafting and debugging code, refining documentation |
+| Claude (Anthropic) | Explaining concepts, drafting and debugging code, refining documentation |
+| Cursor (and the models available in it, e.g. Claude, GPT, Composer) | In-editor code completion, refactoring, and agentic edits across the repo |
+| DeepSeek | Explaining concepts, drafting and debugging code |
+
+How we used them:
+
+- AI assistance was used for boilerplate, refactoring, debugging, and wording — not for
+  generating results, data, or findings.
+- Every AI-suggested change was read, edited where needed, and run by a team member
+  before being committed. The team is responsible for all code in this repository.
+- No dataset content, evaluation numbers, or reported results were fabricated or produced
+  by these tools; all numbers in `results/` come from actually running the pipeline.
+
+Note that this is separate from the Qwen models (`qwen3:0.6b` / `qwen3:1.7b`) run via
+Ollama inside the pipeline itself — those are the object of study, not authoring
+assistance.
